@@ -183,7 +183,11 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body interface
 
 		if result != nil && len(respBody) > 0 {
 			if err := json.Unmarshal(respBody, result); err != nil {
-				return fmt.Errorf("unmarshal response: %w\nbody: %s", err, string(respBody)[:500])
+				trunc := respBody
+				if len(trunc) > 500 {
+					trunc = trunc[:500]
+				}
+				return fmt.Errorf("unmarshal response: %w\nbody: %s", err, string(trunc))
 			}
 		}
 		return nil
@@ -282,7 +286,11 @@ func (c *Client) downloadOnce(ctx context.Context, url, destPath string) error {
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("download HTTP %d: %s", resp.StatusCode, string(body)[:200])
+		trunc := body
+		if len(trunc) > 200 {
+			trunc = trunc[:200]
+		}
+		return fmt.Errorf("download HTTP %d: %s", resp.StatusCode, string(trunc))
 	}
 
 	f, err := os.Create(destPath)
