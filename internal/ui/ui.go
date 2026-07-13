@@ -1417,23 +1417,30 @@ func (m Model) View() string {
 	return m.frame(raw)
 }
 
-// frame wraps text in a plain box-drawing-character border (lazygit style).
-// No ANSI styling on the border characters — this avoids the alignment
-// bugs that happen when styled borders interact with styled content.
-// Each line of text gets a plain │ prefix and suffix with space padding.
+// frame wraps text in a plain box-drawing-character border with rounded
+// corners (lazygit style). No ANSI styling on the border characters.
+// Lines that exceed the frame width are truncated so the right border
+// stays aligned.
 func (m Model) frame(text string) string {
 	width := max(m.termWidth, 40) - 2
 	var out strings.Builder
 
-	// Top border.
-	out.WriteString("┌")
+	// Top border — rounded corners.
+	out.WriteString("╭")
 	out.WriteString(strings.Repeat("─", max(0, width)))
-	out.WriteString("┐")
+	out.WriteString("╮")
 	out.WriteString("\n")
 
 	lines := strings.Split(text, "\n")
 	for _, line := range lines {
 		plain := stripANSI(line)
+		if len(plain) > width {
+			// Line is too long — truncate to fit inside the frame.
+			// We need to truncate the raw line (with ANSI codes) to
+			// width visible chars.
+			line = truncateToWidth(line, width)
+			plain = stripANSI(line)
+		}
 		pad := width - len(plain)
 		if pad < 0 {
 			pad = 0
@@ -1445,12 +1452,40 @@ func (m Model) frame(text string) string {
 		out.WriteString("\n")
 	}
 
-	// Bottom border.
-	out.WriteString("└")
+	// Bottom border — rounded corners.
+	out.WriteString("╰")
 	out.WriteString(strings.Repeat("─", max(0, width)))
-	out.WriteString("┘")
+	out.WriteString("╯")
 
 	return out.String()
+}
+
+// truncateToWidth cuts a string (which may contain ANSI escape codes)
+// to at most visibleWidth printable characters. ANSI codes are preserved.
+func truncateToWidth(s string, visibleWidth int) string {
+	var result strings.Builder
+	visible := 0
+	inEscape := false
+	for _, r := range s {
+		if inEscape {
+			result.WriteRune(r)
+			if r == 'm' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				inEscape = false
+			}
+			continue
+		}
+		if r == '\x1b' {
+			inEscape = true
+			result.WriteRune(r)
+			continue
+		}
+		if visible >= visibleWidth {
+			break
+		}
+		result.WriteRune(r)
+		visible++
+	}
+	return result.String()
 }
 
 // viewQueue renders each job in the queue as a single status line.
@@ -1510,7 +1545,14 @@ func (m *Model) viewConfig(b *strings.Builder) {
 	b.WriteString("Configure your generation:\n\n")
 
 	// Left-column width: label + cursor + input, padded for alignment.
-	const leftColWidth = 80
+	// Capped to fit inside the frame (termWidth minus border and right-pane space).
+	leftColWidth := m.termWidth - 35
+	if leftColWidth < 50 {
+		leftColWidth = 50
+	}
+	if leftColWidth > 80 {
+		leftColWidth = 80
+	}
 
 	// Render left-column lines into a slice.
 	var leftLines []string
