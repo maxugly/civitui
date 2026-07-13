@@ -49,7 +49,7 @@ func NewClient(apiKey string) *Client {
 type GenerationRequest struct {
 	Prompt         string  `json:"prompt"`
 	NegativePrompt string  `json:"negativePrompt,omitempty"`
-	Model          string  `json:"model"`
+	Model          string  `json:"baseModel"`
 	FluxMode       string  `json:"fluxMode,omitempty"`       // Flux variant: empty (off) or a full AIR URN
 	Sampler        string  `json:"sampler,omitempty"`
 	Scheduler      string  `json:"scheduler,omitempty"`      // noise schedule: simple, discrete, karras, exponential, ays

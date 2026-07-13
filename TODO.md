@@ -6,10 +6,10 @@ Following Grok's audit: [specs/api_parameters_audit.md](specs/api_parameters_aud
 
 ### Tier 1 — High Value, Easy Wins
 
-- [ ] **aspectRatio** — model-aware dropdown that auto-fills width/height. Presets per model: 1:1, 3:2, 2:3, 16:9, 9:16, 4:3, 3:4. Flux Ultra adds 21:9, 9:21.
-- [ ] **fluxMode** — dropdown for Flux model variants: Draft / Standard / Krea / Pro 1.1 / Ultra. Only visible when base model is Flux1. Maps labels to AIR URNs internally.
-- [ ] **outputFormat** — PNG vs JPEG toggle. Simple dropdown. Default JPEG.
-- [ ] **scheduler** — dropdown: simple, discrete, karras, exponential, ays. Hide in advanced section. Model-aware: ZImage only simple/discrete, Flux2Klein all except ays.
+- [x] **aspectRatio** — model-aware dropdown that auto-fills width/height. Presets per model: 1:1, 3:2, 2:3, 16:9, 9:16, 4:3, 3:4. Flux Ultra adds 21:9, 9:21.
+- [x] **fluxMode** — dropdown for Flux model variants: Draft / Standard / Krea / Pro 1.1 / Ultra. Only visible when base model is Flux1. Maps labels to AIR URNs internally.
+- [x] **outputFormat** — PNG vs JPEG toggle. Simple dropdown. Default JPEG.
+- [x] **scheduler** — dropdown: simple, discrete, karras, exponential, ays. Hide in advanced section. Model-aware: ZImage only simple/discrete, Flux2Klein all except ays.
 - [ ] **draft** — toggle for fast preview mode. Injects draft LoRAs, drops steps to 6–8. "Speed over quality."
 
 ### Tier 2 — Worth Adding, Medium Effort
@@ -22,7 +22,7 @@ Following Grok's audit: [specs/api_parameters_audit.md](specs/api_parameters_aud
 
 ### Bugfix
 
-- [ ] **BUGFIX: model → baseModel JSON key** — `pkg/civit/civit.go` line 52 sends `json:"model"` but schema expects `json:"baseModel"`.
+- [x] **BUGFIX: model → baseModel JSON key** — `pkg/civit/civit.go` line 52 sends `json:"model"` but schema expects `json:"baseModel"`. Fixed in commit.
 
 ## Completed Tasks
 
