@@ -716,30 +716,35 @@ func newTextInput(placeholder, value string, width int) textinput.Model {
 // Numeric fields carry character-validation callbacks so letters are
 // rejected at the keystroke level.
 func NewModel(client *civit.Client, debug bool) Model {
-	inputWidth := 80
+	// Compute input widths that fit inside the frame.
+	// The left column has: 2-space indent + 18-char label + ": " + input.
+	// With leftColWidth capped at 80, the input can be at most ~55 chars.
+	// Prompt and negative prompt get wider inputs; others are shorter.
+	textWidth := 55
+	promptWidth := 65
 
 	inputs := make([]textinput.Model, numFormFields)
-	inputs[fiPrompt] = newTextInput("a majestic cat wearing a top hat", "", 100)
-	inputs[fiNegativePrompt] = newTextInput("optional — what to avoid", "", 100)
-	inputs[fiModel] = newTextInput("air:flux1:checkpoint:civitai:618692@691639", "air:flux1:checkpoint:civitai:618692@691639", inputWidth)
-	inputs[fiFluxMode] = newTextInput("Standard", "urn:air:flux1:checkpoint:civitai:618692@691639", inputWidth)
-	inputs[fiSampler] = newTextInput("Euler a", "Euler a", inputWidth)
-	inputs[fiScheduler] = newTextInput("EulerA", "EulerA", inputWidth)
+	inputs[fiPrompt] = newTextInput("a majestic cat wearing a top hat", "", promptWidth)
+	inputs[fiNegativePrompt] = newTextInput("optional — what to avoid", "", promptWidth)
+	inputs[fiModel] = newTextInput("air:flux1:checkpoint:civitai:618692@691639", "air:flux1:checkpoint:civitai:618692@691639", textWidth)
+	inputs[fiFluxMode] = newTextInput("Standard", "urn:air:flux1:checkpoint:civitai:618692@691639", textWidth)
+	inputs[fiSampler] = newTextInput("Euler a", "Euler a", textWidth)
+	inputs[fiScheduler] = newTextInput("EulerA", "EulerA", textWidth)
 	inputs[fiAspectRatio] = newTextInput("1:1", "1:1", 14)
 	inputs[fiWidth] = newTextInput("1024", "1024", 10)
 	inputs[fiHeight] = newTextInput("1024", "1024", 10)
 	inputs[fiSteps] = newTextInput("20", "20", 6)
 	inputs[fiCFGScale] = newTextInput("7.0", "7.0", 8)
 	inputs[fiQuantity] = newTextInput("4", "4", 6)
-	inputs[fiOutputFormat] = newTextInput("jpeg", "jpeg", inputWidth)
+	inputs[fiOutputFormat] = newTextInput("jpeg", "jpeg", textWidth)
 	inputs[fiSeed] = newTextInput("random", "", 16)
-	inputs[fiDraft] = newTextInput("false", "false", inputWidth)
+	inputs[fiDraft] = newTextInput("false", "false", textWidth)
 	inputs[fiDenoise] = newTextInput("0.4", "", 8)
 	inputs[fiClipSkip] = newTextInput("2", "2", 6)
 	inputs[fiUpscaleWidth] = newTextInput("disabled", "", 10)
 	inputs[fiUpscaleHeight] = newTextInput("disabled", "", 10)
-	inputs[fiExperimental] = newTextInput("false", "false", inputWidth)
-	inputs[fiFluxUltraRaw] = newTextInput("false", "false", inputWidth)
+	inputs[fiExperimental] = newTextInput("false", "false", textWidth)
+	inputs[fiFluxUltraRaw] = newTextInput("false", "false", textWidth)
 
 	// Character validation: block letters in numeric fields.
 	// empty input is always allowed (resolves to default/zero).
@@ -1376,13 +1381,14 @@ func (m Model) View() string {
 	b.WriteString("\n\n")
 
 	// ── Config form ──
+	b.WriteString(m.sectionDivider("Configure generation"))
+	b.WriteString("\n")
 	m.viewConfig(&b)
 
 	// ── Queue ──
 	if len(m.jobs) > 0 {
 		b.WriteString("\n")
-		b.WriteString(dimStyle.Render("── Queue "))
-		b.WriteString(dimStyle.Render(strings.Repeat("─", max(0, m.termWidth-11))))
+		b.WriteString(m.sectionDivider("Queue"))
 		b.WriteString("\n")
 		m.viewQueue(&b)
 	}
@@ -1390,8 +1396,7 @@ func (m Model) View() string {
 	// ── Debug ──
 	if m.debug && len(m.debugLog) > 0 {
 		b.WriteString("\n")
-		b.WriteString(dimStyle.Render("── Debug "))
-		b.WriteString(dimStyle.Render(strings.Repeat("─", max(0, m.termWidth-11))))
+		b.WriteString(m.sectionDivider("Debug"))
 		b.WriteString("\n")
 		start := len(m.debugLog) - 8
 		if start < 0 {
@@ -1410,11 +1415,30 @@ func (m Model) View() string {
 	}
 
 	// ── Footer ──
-	b.WriteString(fmt.Sprintf("\n\n%s", footerStyle.Render("ctrl+c quit  •  tab/↑↓ navigate  •  enter generate")))
+	b.WriteString("\n\n")
+	b.WriteString(m.sectionDivider("ctrl+c quit  •  tab/↑↓ navigate  •  enter generate"))
+	b.WriteString("\n")
 
 	// Wrap the whole output in a frame.
 	raw := b.String()
 	return m.frame(raw)
+}
+
+// sectionDivider returns a line that intersects the frame border, like:
+//
+//	├── Queue ──────────────────────────────────────────┤
+//
+// The label sits on the divider line itself (lazygit style).
+func (m Model) sectionDivider(label string) string {
+	width := max(m.termWidth, 40) - 2
+	prefix := "── "
+	suffix := " "
+	totalLabel := prefix + label + suffix
+	remaining := width - len(totalLabel)
+	if remaining < 2 {
+		remaining = 2
+	}
+	return "├" + dimStyle.Render(prefix) + dimStyle.Render(label) + dimStyle.Render(suffix) + dimStyle.Render(strings.Repeat("─", remaining)) + "┤"
 }
 
 // frame wraps text in a plain box-drawing-character border with rounded
@@ -1433,11 +1457,21 @@ func (m Model) frame(text string) string {
 
 	lines := strings.Split(text, "\n")
 	for _, line := range lines {
+		// Section divider lines already have ├/┤ borders — pass through as-is.
+		if strings.HasPrefix(line, "├") {
+			plain := stripANSI(line)
+			pad := width - len(plain)
+			if pad < 0 {
+				pad = 0
+			}
+			out.WriteString(line)
+			out.WriteString(strings.Repeat(" ", pad))
+			out.WriteString("\n")
+			continue
+		}
+
 		plain := stripANSI(line)
 		if len(plain) > width {
-			// Line is too long — truncate to fit inside the frame.
-			// We need to truncate the raw line (with ANSI codes) to
-			// width visible chars.
 			line = truncateToWidth(line, width)
 			plain = stripANSI(line)
 		}
@@ -1542,8 +1576,6 @@ func (m *Model) viewQueue(b *strings.Builder) {
 // ── View Helpers ─────────────────────────────────────────────────────────────
 
 func (m *Model) viewConfig(b *strings.Builder) {
-	b.WriteString("Configure your generation:\n\n")
-
 	// Left-column width: label + cursor + input, padded for alignment.
 	// Capped to fit inside the frame (termWidth minus border and right-pane space).
 	leftColWidth := m.termWidth - 35
