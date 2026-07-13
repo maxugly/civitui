@@ -87,7 +87,8 @@ type workflowStep struct {
 
 // workflowPayload is the top-level JSON body sent to POST /v2/consumer/workflows.
 type workflowPayload struct {
-	Steps []workflowStep `json:"steps"`
+	WorkflowTemplate string         `json:"workflowTemplate"`
+	Steps            []workflowStep `json:"steps"`
 }
 
 // WorkflowResponse is the JSON returned by the workflow endpoints.
@@ -221,6 +222,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body interface
 // This does NOT spend any buzz — the UI uses this to prompt for confirmation.
 func (c *Client) CalculatePrice(ctx context.Context, req GenerationRequest) (int, error) {
 	payload := workflowPayload{
+		WorkflowTemplate: "txt2img",
 		Steps: []workflowStep{{
 			Type:  "textToImage",
 			Input: &req,
@@ -243,6 +245,7 @@ func (c *Client) CalculatePrice(ctx context.Context, req GenerationRequest) (int
 // Use PollJobStatus to wait for completion.
 func (c *Client) SubmitJob(ctx context.Context, req GenerationRequest) (string, error) {
 	payload := workflowPayload{
+		WorkflowTemplate: "txt2img",
 		Steps: []workflowStep{{
 			Type:  "textToImage",
 			Input: &req,
