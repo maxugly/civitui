@@ -62,6 +62,21 @@ type GenerationRequest struct {
 	OutputFormat   string  `json:"outputFormat,omitempty"`   // "jpeg" or "png"
 	Seed           *int64  `json:"seed,omitempty"` // nil means random
 	Draft          bool    `json:"draft"`           // fast preview mode: injects draft LoRAs, drops steps, sets CFG=1
+	// Tier 2 fields
+	SourceImage     *SourceImage `json:"sourceImage,omitempty"`     // img2img source image (CivitAI-hosted URL)
+	Denoise         *float64     `json:"denoise,omitempty"`         // 0.0–1.0, img2img denoising strength
+	ClipSkip        *int         `json:"clipSkip,omitempty"`        // 1–3, SD/SDXL only, default 2
+	UpscaleWidth    *int         `json:"upscaleWidth,omitempty"`    // 320–3840
+	UpscaleHeight   *int         `json:"upscaleHeight,omitempty"`   // 320–3840
+	Experimental    *bool        `json:"experimental,omitempty"`    // SDCPP edge features
+	FluxUltraRaw    *bool        `json:"fluxUltraRaw,omitempty"`    // Flux Ultra raw mode
+}
+
+// SourceImage is a reference image for image-to-image generation.
+type SourceImage struct {
+	URL    string `json:"url"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
 }
 
 // workflowStep is the internal JSON shape for a single step in the workflow.

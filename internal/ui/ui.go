@@ -65,7 +65,7 @@ func (p Phase) String() string {
 }
 
 // numFormFields is the count of editable fields in the config form.
-const numFormFields = 15
+const numFormFields = 21
 
 // Form field indices into the inputs slice.
 const (
@@ -84,13 +84,21 @@ const (
 	fiOutputFormat          // 12 — text (presets)
 	fiSeed                  // 13 — int64 (nil if empty)
 	fiDraft                 // 14 — boolean (presets: true/false)
+	fiDenoise               // 15 — float (0.0–1.0, img2img only)
+	fiClipSkip              // 16 — int (1–3, SD/SDXL only)
+	fiUpscaleWidth          // 17 — int (320–3840)
+	fiUpscaleHeight         // 18 — int (320–3840)
+	fiExperimental          // 19 — boolean (presets, advanced)
+	fiFluxUltraRaw          // 20 — boolean (presets, Flux Ultra only)
 )
 
 // isReplaceOnFocus reports whether the field at idx should clear on
 // first keystroke. Applies to all numeric fields. Prompt, negative
 // prompt, model, and sampler keep normal behavior.
 func isReplaceOnFocus(idx int) bool {
-	return idx >= fiWidth && idx <= fiSeed
+	return (idx >= fiWidth && idx <= fiSeed) ||
+		idx == fiDenoise || idx == fiClipSkip ||
+		idx == fiUpscaleWidth || idx == fiUpscaleHeight
 }
 
 // isPresetsField reports whether the field at idx uses the right-pane
@@ -98,7 +106,7 @@ func isReplaceOnFocus(idx int) bool {
 func isPresetsField(idx int) bool {
 	return idx == fiModel || idx == fiFluxMode || idx == fiSampler ||
 		idx == fiScheduler || idx == fiAspectRatio || idx == fiOutputFormat ||
-		idx == fiDraft
+		idx == fiDraft || idx == fiExperimental || idx == fiFluxUltraRaw
 }
 
 // ── Regex ────────────────────────────────────────────────────────────────────
@@ -184,6 +192,12 @@ var fieldLabels = []string{
 	"Output Format",
 	"Seed",
 	"Draft Mode (fast preview)",
+	"Denoise",
+	"CLIP Skip",
+	"Upscale Width",
+	"Upscale Height",
+	"Experimental Mode",
+	"Flux Ultra Raw",
 }
 
 // ── Model Presets ────────────────────────────────────────────────────────────
@@ -407,6 +421,55 @@ var draftPresets = []DraftPreset{
 	},
 }
 
+// ── Experimental Mode Presets ─────────────────────────────────────────────────
+
+var experimentalPresets = []DraftPreset{
+	{
+		Name:        "false",
+		Description: "Standard generation. Default.",
+		Value:       false,
+	},
+	{
+		Name:        "true",
+		Description: "Experimental Mode. Enables SDCPP engine edge features for supported models (SD1, SDXL, Pony, Illustrious, NoobAI, Flux1, FluxKrea).",
+		Value:       true,
+	},
+}
+
+// ── Flux Ultra Raw Presets ────────────────────────────────────────────────────
+
+var fluxUltraRawPresets = []DraftPreset{
+	{
+		Name:        "false",
+		Description: "Standard Flux Ultra output. Default.",
+		Value:       false,
+	},
+	{
+		Name:        "true",
+		Description: "Flux Ultra Raw Mode. Generates less-refined, more photorealistic results from Flux Ultra.",
+		Value:       true,
+	},
+}
+
+// ── Field Visibility ──────────────────────────────────────────────────────────
+
+// isFieldVisible reports whether the field at idx should be shown given the
+// current form state. Some fields are conditionally hidden (e.g. denoise
+// only when a source image is attached, clipSkip only for SD/SDXL models).
+func (m *Model) isFieldVisible(idx int) bool {
+	switch idx {
+	case fiDenoise:
+		return false // hidden until img2img source image support is added
+	case fiClipSkip:
+		model := m.inputs[fiModel].Value()
+		return !strings.Contains(model, "flux") && !strings.Contains(model, "zImage")
+	case fiFluxUltraRaw:
+		return m.inputs[fiFluxMode].Value() == "urn:air:flux1:checkpoint:civitai:618692@1088507"
+	default:
+		return true
+	}
+}
+
 // fieldHelpText provides the right-pane help for each non-Model field.
 // Index aligns with the fi* constants.
 var fieldHelpText = []string{
@@ -425,6 +488,12 @@ var fieldHelpText = []string{
 	/* fiOutputFormat */ "Output image format. JPEG is smaller; PNG is lossless. Use Right Arrow to select.",
 	/* fiSeed */ "Random seed for generation consistency. Range: 1–4294967295. Leave empty for a random seed.",
 	/* fiDraft */ "Enable Draft Mode for fast previews (speed over quality). Injects draft LoRAs, reduces steps, sets CFG to 1. Use Right Arrow to select.",
+	/* fiDenoise */ "Denoising strength for image-to-image workflows. Range: 0.0–1.0. 0.0 means no change, 1.0 means full regeneration. Only shown when a source image is attached.",
+	/* fiClipSkip */ "Skip last N layers of CLIP text encoder. Range: 1–3. Default 2. Higher values reduce prompt adherence. Only for SD/SDXL models.",
+	/* fiUpscaleWidth */ "Target width for upscaling. Range: 320–3840. Leave empty to disable.",
+	/* fiUpscaleHeight */ "Target height for upscaling. Range: 320–3840. Leave empty to disable.",
+	/* fiExperimental */ "Enable SDCPP experimental engine features. Use Right Arrow to select.",
+	/* fiFluxUltraRaw */ "Flux Ultra Raw Mode. Less refined, more photorealistic. Only shown when Flux Mode is Ultra. Use Right Arrow to select.",
 }
 
 // ── Constructor ──────────────────────────────────────────────────────────────
@@ -464,6 +533,12 @@ func NewModel(client *civit.Client) Model {
 	inputs[fiOutputFormat] = newTextInput("jpeg", "jpeg", inputWidth)
 	inputs[fiSeed] = newTextInput("random", "", 16)
 	inputs[fiDraft] = newTextInput("false", "false", inputWidth)
+	inputs[fiDenoise] = newTextInput("0.4", "", 8)
+	inputs[fiClipSkip] = newTextInput("2", "2", 6)
+	inputs[fiUpscaleWidth] = newTextInput("disabled", "", 10)
+	inputs[fiUpscaleHeight] = newTextInput("disabled", "", 10)
+	inputs[fiExperimental] = newTextInput("false", "false", inputWidth)
+	inputs[fiFluxUltraRaw] = newTextInput("false", "false", inputWidth)
 
 	// Character validation: block letters in numeric fields.
 	// empty input is always allowed (resolves to default/zero).
@@ -567,6 +642,70 @@ func NewModel(client *civit.Client) Model {
 		return nil
 	}
 
+	inputs[fiDenoise].Validate = func(s string) error {
+		if s == "" {
+			return nil
+		}
+		if !floatRegex.MatchString(s) {
+			return fmt.Errorf("must be a decimal number")
+		}
+		val, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return nil
+		}
+		if val < 0.0 || val > 1.0 {
+			return fmt.Errorf("denoise must be between 0.0 and 1.0")
+		}
+		return nil
+	}
+	inputs[fiClipSkip].Validate = func(s string) error {
+		if s == "" {
+			return nil
+		}
+		if !intRegex.MatchString(s) {
+			return fmt.Errorf("must be an integer")
+		}
+		val, err := strconv.Atoi(s)
+		if err != nil {
+			return nil
+		}
+		if val < 1 || val > 3 {
+			return fmt.Errorf("clip skip must be 1, 2, or 3")
+		}
+		return nil
+	}
+	inputs[fiUpscaleWidth].Validate = func(s string) error {
+		if s == "" {
+			return nil
+		}
+		if !intRegex.MatchString(s) {
+			return fmt.Errorf("must be an integer")
+		}
+		val, err := strconv.Atoi(s)
+		if err != nil {
+			return nil
+		}
+		if val < 320 || val > 3840 {
+			return fmt.Errorf("upscale width must be 320-3840")
+		}
+		return nil
+	}
+	inputs[fiUpscaleHeight].Validate = func(s string) error {
+		if s == "" {
+			return nil
+		}
+		if !intRegex.MatchString(s) {
+			return fmt.Errorf("must be an integer")
+		}
+		val, err := strconv.Atoi(s)
+		if err != nil {
+			return nil
+		}
+		if val < 320 || val > 3840 {
+			return fmt.Errorf("upscale height must be 320-3840")
+		}
+		return nil
+	}
 	// Focus the first field.
 	inputs[fiPrompt].Focus()
 
@@ -610,7 +749,47 @@ func (m *Model) toRequest() civit.GenerationRequest {
 		OutputFormat:   m.inputs[fiOutputFormat].Value(),
 		Seed:           seed,
 		Draft:          m.inputs[fiDraft].Value() == "true",
+		// Tier 2
+		Denoise:       parseFloatPtr(m.inputs[fiDenoise].Value()),
+		ClipSkip:      parseIntPtr(m.inputs[fiClipSkip].Value()),
+		UpscaleWidth:  parseIntPtr(m.inputs[fiUpscaleWidth].Value()),
+		UpscaleHeight: parseIntPtr(m.inputs[fiUpscaleHeight].Value()),
+		Experimental:  parseBoolPtr(m.inputs[fiExperimental].Value()),
+		FluxUltraRaw:  parseBoolPtr(m.inputs[fiFluxUltraRaw].Value()),
 	}
+}
+
+// parseFloatPtr parses a string to *float64. Empty string returns nil.
+func parseFloatPtr(s string) *float64 {
+	if s == "" {
+		return nil
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return nil
+	}
+	return &v
+}
+
+// parseIntPtr parses a string to *int. Empty string returns nil.
+func parseIntPtr(s string) *int {
+	if s == "" {
+		return nil
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return nil
+	}
+	return &v
+}
+
+// parseBoolPtr parses a string to *bool. Empty string returns nil.
+func parseBoolPtr(s string) *bool {
+	if s == "" {
+		return nil
+	}
+	v := s == "true"
+	return &v
 }
 
 // refocusConfig snaps the phase back to config and re-focuses the active input.
@@ -678,6 +857,43 @@ func (m *Model) validateNumericFields() error {
 		}
 		if val < 1 || val > 4294967295 {
 			return fmt.Errorf("seed must be between 1 and 4294967295")
+		}
+	}
+	// Tier 2
+	if v := m.inputs[fiDenoise].Value(); v != "" {
+		val, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return fmt.Errorf("denoise: invalid float %q", v)
+		}
+		if val < 0.0 || val > 1.0 {
+			return fmt.Errorf("denoise must be between 0.0 and 1.0")
+		}
+	}
+	if v := m.inputs[fiClipSkip].Value(); v != "" {
+		val, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("clip skip: invalid integer %q", v)
+		}
+		if val < 1 || val > 3 {
+			return fmt.Errorf("clip skip must be 1, 2, or 3")
+		}
+	}
+	if v := m.inputs[fiUpscaleWidth].Value(); v != "" {
+		val, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("upscale width: invalid integer %q", v)
+		}
+		if val < 320 || val > 3840 {
+			return fmt.Errorf("upscale width must be between 320 and 3840")
+		}
+	}
+	if v := m.inputs[fiUpscaleHeight].Value(); v != "" {
+		val, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("upscale height: invalid integer %q", v)
+		}
+		if val < 320 || val > 3840 {
+			return fmt.Errorf("upscale height must be between 320 and 3840")
 		}
 	}
 	return nil
@@ -984,6 +1200,22 @@ func (m *Model) viewConfig(b *strings.Builder) {
 					Description string
 				}{preset.Name, preset.Description})
 			}
+		case fiExperimental:
+			rightLines = append(rightLines, dimStyle.Render("── Experimental Mode ──"))
+			for _, preset := range experimentalPresets {
+				presetsList = append(presetsList, struct {
+					Name        string
+					Description string
+				}{preset.Name, preset.Description})
+			}
+		case fiFluxUltraRaw:
+			rightLines = append(rightLines, dimStyle.Render("── Flux Ultra Raw ──"))
+			for _, preset := range fluxUltraRawPresets {
+				presetsList = append(presetsList, struct {
+					Name        string
+					Description string
+				}{preset.Name, preset.Description})
+			}
 		}
 		for j, preset := range presetsList {
 			marker := "  "
@@ -1168,6 +1400,10 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			presetsLen = len(outputFormatPresets)
 		case fiDraft:
 			presetsLen = len(draftPresets)
+		case fiExperimental:
+			presetsLen = len(experimentalPresets)
+		case fiFluxUltraRaw:
+			presetsLen = len(fluxUltraRawPresets)
 		}
 		switch key {
 		case "up", "k":
@@ -1201,6 +1437,10 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.inputs[fiOutputFormat].SetValue(outputFormatPresets[m.activePreset].Format)
 			case fiDraft:
 				m.inputs[fiDraft].SetValue(draftPresets[m.activePreset].Name)
+			case fiExperimental:
+				m.inputs[fiExperimental].SetValue(experimentalPresets[m.activePreset].Name)
+			case fiFluxUltraRaw:
+				m.inputs[fiFluxUltraRaw].SetValue(fluxUltraRawPresets[m.activePreset].Name)
 			}
 			m.inPresetsPane = false
 			return m, nil
