@@ -10,7 +10,29 @@ Following Grok's audit: [specs/api_parameters_audit.md](specs/api_parameters_aud
 - [x] **fluxMode** — dropdown for Flux model variants: Draft / Standard / Krea / Pro 1.1 / Ultra. Only visible when base model is Flux1. Maps labels to AIR URNs internally.
 - [x] **outputFormat** — PNG vs JPEG toggle. Simple dropdown. Default JPEG.
 - [x] **scheduler** — dropdown: simple, discrete, karras, exponential, ays. Hide in advanced section. Model-aware: ZImage only simple/discrete, Flux2Klein all except ays.
-- [ ] **draft** — toggle for fast preview mode. Injects draft LoRAs, drops steps to 6–8. "Speed over quality."
+- [x] **draft** — toggle for fast preview mode. Injects draft LoRAs, drops steps to 6–8. "Speed over quality." (Spec: [specs/draft-toggle.md](specs/draft-toggle.md)) — completed in commit pending
+
+## Active Tasks — Draft Toggle
+
+- [x] **Write Specification** — Draft toggle specification [specs/draft-toggle.md](specs/draft-toggle.md)
+- [x] **Update Core Engine Struct (`pkg/civit/civit.go`)**
+  - Add `Draft` boolean field (`json:"draft"`) to `civit.GenerationRequest` struct.
+- [x] **Update Constants and Preset Config (`internal/ui/ui.go`)**
+  - Increment `numFormFields` from 14 to 15.
+  - Add `fiDraft` constant (value 14).
+  - Update `isPresetsField()` to return true for `fiDraft`.
+  - Add `draftPresets` slice with `true` and `false` options and descriptions.
+- [x] **Initialize and Render Form Field (`internal/ui/ui.go`)**
+  - In `NewModel()`, initialize `inputs[fiDraft]` with placeholder "false" and initial value "false".
+  - In `fieldLabels`, add `"Draft Mode (fast preview)"` at index 14.
+  - In `fieldHelpText`, add description for the draft toggle at index 14.
+  - In `viewConfig()`, add case for `fiDraft` to display the "Draft Mode" preset list.
+- [x] **Handle User Input and Mapping (`internal/ui/ui.go`)**
+  - In `handleConfigKey()`, handle preset navigation length (`presetsLen`) and selection (`SetValue()`) for `fiDraft`.
+  - In `toRequest()`, parse the string value of `inputs[fiDraft]` into `Draft` boolean of `civit.GenerationRequest`.
+- [x] **Add Unit Tests and Verify Quality Gates**
+  - Update `pkg/civit/civit_test.go` or add assertions to verify that the `draft` field is marshalled correctly.
+  - Run quality gates: `go build ./...`, `go vet ./...`, `go test ./... -count=1` to ensure all pass.
 
 ### Tier 2 — Worth Adding, Medium Effort
 

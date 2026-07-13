@@ -65,7 +65,7 @@ func (p Phase) String() string {
 }
 
 // numFormFields is the count of editable fields in the config form.
-const numFormFields = 14
+const numFormFields = 15
 
 // Form field indices into the inputs slice.
 const (
@@ -83,6 +83,7 @@ const (
 	fiQuantity              // 11 — int
 	fiOutputFormat          // 12 — text (presets)
 	fiSeed                  // 13 — int64 (nil if empty)
+	fiDraft                 // 14 — boolean (presets: true/false)
 )
 
 // isReplaceOnFocus reports whether the field at idx should clear on
@@ -96,7 +97,8 @@ func isReplaceOnFocus(idx int) bool {
 // presets selector (right arrow to browse, no free-form typing).
 func isPresetsField(idx int) bool {
 	return idx == fiModel || idx == fiFluxMode || idx == fiSampler ||
-		idx == fiScheduler || idx == fiAspectRatio || idx == fiOutputFormat
+		idx == fiScheduler || idx == fiAspectRatio || idx == fiOutputFormat ||
+		idx == fiDraft
 }
 
 // ── Regex ────────────────────────────────────────────────────────────────────
@@ -181,6 +183,7 @@ var fieldLabels = []string{
 	"Quantity",
 	"Output Format",
 	"Seed",
+	"Draft Mode (fast preview)",
 }
 
 // ── Model Presets ────────────────────────────────────────────────────────────
@@ -382,6 +385,28 @@ var outputFormatPresets = []OutputFormatPreset{
 	},
 }
 
+// ── Draft Mode Presets ────────────────────────────────────────────────────────
+
+// DraftPreset selects the draft mode value (true/false toggle).
+type DraftPreset struct {
+	Name        string
+	Description string
+	Value       bool
+}
+
+var draftPresets = []DraftPreset{
+	{
+		Name:        "false",
+		Description: "Normal generation. Speed and quality are dictated by other parameters. Default.",
+		Value:       false,
+	},
+	{
+		Name:        "true",
+		Description: "Draft Mode. Injects draft LoRAs (SD1: 424706, SDXL: 391999), reduces steps to 6-8, and sets CFG to 1. Speed over quality.",
+		Value:       true,
+	},
+}
+
 // fieldHelpText provides the right-pane help for each non-Model field.
 // Index aligns with the fi* constants.
 var fieldHelpText = []string{
@@ -399,6 +424,7 @@ var fieldHelpText = []string{
 	/* fiQuantity */ "Number of images to generate. Range: 1–20 (API limit). Each image is processed concurrently in the workflow.",
 	/* fiOutputFormat */ "Output image format. JPEG is smaller; PNG is lossless. Use Right Arrow to select.",
 	/* fiSeed */ "Random seed for generation consistency. Range: 1–4294967295. Leave empty for a random seed.",
+	/* fiDraft */ "Enable Draft Mode for fast previews (speed over quality). Injects draft LoRAs, reduces steps, sets CFG to 1. Use Right Arrow to select.",
 }
 
 // ── Constructor ──────────────────────────────────────────────────────────────
@@ -437,6 +463,7 @@ func NewModel(client *civit.Client) Model {
 	inputs[fiQuantity] = newTextInput("4", "4", 6)
 	inputs[fiOutputFormat] = newTextInput("jpeg", "jpeg", inputWidth)
 	inputs[fiSeed] = newTextInput("random", "", 16)
+	inputs[fiDraft] = newTextInput("false", "false", inputWidth)
 
 	// Character validation: block letters in numeric fields.
 	// empty input is always allowed (resolves to default/zero).
@@ -582,6 +609,7 @@ func (m *Model) toRequest() civit.GenerationRequest {
 		Quantity:       quantity,
 		OutputFormat:   m.inputs[fiOutputFormat].Value(),
 		Seed:           seed,
+		Draft:          m.inputs[fiDraft].Value() == "true",
 	}
 }
 
@@ -948,6 +976,14 @@ func (m *Model) viewConfig(b *strings.Builder) {
 					Description string
 				}{preset.Name, preset.Description})
 			}
+		case fiDraft:
+			rightLines = append(rightLines, dimStyle.Render("── Draft Mode ──"))
+			for _, preset := range draftPresets {
+				presetsList = append(presetsList, struct {
+					Name        string
+					Description string
+				}{preset.Name, preset.Description})
+			}
 		}
 		for j, preset := range presetsList {
 			marker := "  "
@@ -1130,6 +1166,8 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			presetsLen = len(aspectRatioPresets)
 		case fiOutputFormat:
 			presetsLen = len(outputFormatPresets)
+		case fiDraft:
+			presetsLen = len(draftPresets)
 		}
 		switch key {
 		case "up", "k":
@@ -1161,6 +1199,8 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.inputs[fiHeight].SetValue(strconv.Itoa(p.Height))
 			case fiOutputFormat:
 				m.inputs[fiOutputFormat].SetValue(outputFormatPresets[m.activePreset].Format)
+			case fiDraft:
+				m.inputs[fiDraft].SetValue(draftPresets[m.activePreset].Name)
 			}
 			m.inPresetsPane = false
 			return m, nil

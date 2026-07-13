@@ -61,6 +61,7 @@ type GenerationRequest struct {
 	Quantity       int     `json:"quantity"`
 	OutputFormat   string  `json:"outputFormat,omitempty"`   // "jpeg" or "png"
 	Seed           *int64  `json:"seed,omitempty"` // nil means random
+	Draft          bool    `json:"draft"`           // fast preview mode: injects draft LoRAs, drops steps, sets CFG=1
 }
 
 // workflowStep is the internal JSON shape for a single step in the workflow.
