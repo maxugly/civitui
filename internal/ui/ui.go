@@ -1406,12 +1406,12 @@ func (m Model) View() string {
 		sections = append(sections, errorStyle.Render(" ✗ "+m.errMsg))
 	}
 
-	// ── Footer ──
-	sections = append(sections, footerStyle.Render("ctrl+c quit  •  tab/↑↓ navigate  •  enter generate"))
+	// ── Footer ── (renders on the bottom border, not as a section)
+	footer := "ctrl+c quit  •  tab/↑↓ navigate  •  enter generate"
 
 	// Join with blank lines between sections, then wrap in outer frame.
 	inner := strings.Join(sections, "\n\n")
-	return m.frame(inner)
+	return m.frame(inner, footer)
 }
 
 // innerPanel wraps content in a square-cornered bordered box with a title
@@ -1428,10 +1428,10 @@ func (m Model) innerPanel(title, content string) string {
 	prefix := "── "
 	tail := strings.Repeat("─", max(0, width-len(prefix)-len(title)-1))
 	b.WriteString("┌")
-	b.WriteString(dimStyle.Render(prefix))
-	b.WriteString(dimStyle.Render(title))
+	b.WriteString(keyStyle.Render(prefix))
+	b.WriteString(keyStyle.Render(title))
 	b.WriteString(" ")
-	b.WriteString(dimStyle.Render(tail))
+	b.WriteString(keyStyle.Render(tail))
 	b.WriteString("┐")
 	b.WriteString("\n")
 
@@ -1462,10 +1462,8 @@ func (m Model) innerPanel(title, content string) string {
 }
 
 // frame wraps text in a plain box-drawing-character border with rounded
-// corners (lazygit style). No ANSI styling on the border characters.
-// Lines that exceed the frame width are truncated so the right border
-// stays aligned.
-func (m Model) frame(text string) string {
+// corners (lazygit style). The footer sits on the bottom border line.
+func (m Model) frame(text string, footer string) string {
 	width := max(m.termWidth, 40) - 2
 	var out strings.Builder
 
@@ -1493,9 +1491,18 @@ func (m Model) frame(text string) string {
 		out.WriteString("\n")
 	}
 
-	// Bottom border — rounded corners.
+	// Bottom border with footer intersecting — lazygit style.
+	footerPlain := footer
+	prefix := "── "
+	tailLen := width - len(prefix) - len(footerPlain) - 1
+	if tailLen < 1 {
+		tailLen = 1
+	}
 	out.WriteString("╰")
-	out.WriteString(strings.Repeat("─", max(0, width)))
+	out.WriteString(keyStyle.Render(prefix))
+	out.WriteString(footerStyle.Render(footerPlain))
+	out.WriteString(" ")
+	out.WriteString(strings.Repeat("─", tailLen))
 	out.WriteString("╯")
 
 	return out.String()
