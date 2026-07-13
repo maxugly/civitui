@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -149,6 +150,10 @@ type Model struct {
 	// activeInput indexes the currently-focused field (0..numFormFields-1).
 	inputs      []textinput.Model
 	activeInput int
+
+	// Multi-line text areas for prompt and negative prompt.
+	promptInput    textarea.Model
+	negPromptInput textarea.Model
 
 	// justFocused is true when the user has just tabbed into a numeric
 	// field. The first printable keystroke clears the existing value so
@@ -724,8 +729,10 @@ func NewModel(client *civit.Client, debug bool) Model {
 	promptWidth := 65
 
 	inputs := make([]textinput.Model, numFormFields)
-	inputs[fiPrompt] = newTextInput("a majestic cat wearing a top hat", "", promptWidth)
-	inputs[fiNegativePrompt] = newTextInput("optional — what to avoid", "", promptWidth)
+	// Prompt and negative prompt use textarea for multi-line input.
+	// The textinput at fiPrompt/fiNegativePrompt are dummies — never rendered.
+	inputs[fiPrompt] = newTextInput("", "", 1)
+	inputs[fiNegativePrompt] = newTextInput("", "", 1)
 	inputs[fiModel] = newTextInput("air:flux1:checkpoint:civitai:618692@691639", "air:flux1:checkpoint:civitai:618692@691639", textWidth)
 	inputs[fiFluxMode] = newTextInput("Standard", "urn:air:flux1:checkpoint:civitai:618692@691639", textWidth)
 	inputs[fiSampler] = newTextInput("Euler a", "Euler a", textWidth)
@@ -917,11 +924,26 @@ func NewModel(client *civit.Client, debug bool) Model {
 	// Focus the first field.
 	inputs[fiPrompt].Focus()
 
+	// Multi-line text areas for prompt (5 lines) and negative prompt (3 lines).
+	pa := textarea.New()
+	pa.Placeholder = "Describe the image you want to generate..."
+	pa.SetHeight(5)
+	pa.SetWidth(promptWidth)
+	pa.Focus()
+
+	npa := textarea.New()
+	npa.Placeholder = "optional — what to avoid"
+	npa.SetHeight(3)
+	npa.SetWidth(promptWidth)
+	npa.Blur()
+
 	m := Model{
-		client:      client,
-		inputs:      inputs,
-		activeInput: 0,
-		debug:       debug,
+		client:         client,
+		inputs:         inputs,
+		activeInput:    0,
+		promptInput:    pa,
+		negPromptInput: npa,
+		debug:          debug,
 	}
 	if debug {
 		m.debugFile = fileDebugLogPath()
@@ -947,8 +969,8 @@ func (m *Model) toRequest() civit.GenerationRequest {
 	}
 
 	return civit.GenerationRequest{
-		Prompt:         m.inputs[fiPrompt].Value(),
-		NegativePrompt: m.inputs[fiNegativePrompt].Value(),
+		Prompt:         m.promptInput.Value(),
+		NegativePrompt: m.negPromptInput.Value(),
 		Model:          m.inputs[fiModel].Value(),
 		FluxMode: func() string {
 			if !m.isFieldVisible(fiFluxMode) {
@@ -1300,9 +1322,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Route Blink and other internal messages to the active textinput.
+	// Route Blink and other internal messages to the active textinput
+	// or textarea.
 	if !m.inPresetsPane {
-		m.inputs[m.activeInput], cmd = m.inputs[m.activeInput].Update(msg)
+		switch m.activeInput {
+		case fiPrompt:
+			m.promptInput, cmd = m.promptInput.Update(msg)
+		case fiNegativePrompt:
+			m.negPromptInput, cmd = m.negPromptInput.Update(msg)
+		default:
+			m.inputs[m.activeInput], cmd = m.inputs[m.activeInput].Update(msg)
+		}
 		return m, cmd
 	}
 
@@ -1323,7 +1353,7 @@ func (m *Model) findJob(id string) *Job {
 func (m *Model) createJob() *Job {
 	id := fmt.Sprintf("%d", m.nextJobID)
 	m.nextJobID++
-	prompt := m.inputs[fiPrompt].Value()
+	prompt := m.promptInput.Value()
 	if len(prompt) > 40 {
 		prompt = prompt[:37] + "..."
 	}
@@ -1617,6 +1647,31 @@ func (m *Model) viewConfig(b *strings.Builder) {
 		if !m.isFieldVisible(i) {
 			continue
 		}
+
+		// Multi-line textarea fields: render each line with label on first only.
+		if i == fiPrompt || i == fiNegativePrompt {
+			var ta textarea.Model
+			if i == fiPrompt {
+				ta = m.promptInput
+			} else {
+				ta = m.negPromptInput
+			}
+			taLines := strings.Split(ta.View(), "\n")
+			for li, tline := range taLines {
+				if li == 0 {
+					lbl := fieldLabelStyle.Render(fmt.Sprintf("  %-16s", fieldLabels[i]+":"))
+					if i == m.activeInput && !m.inPresetsPane {
+						leftLines = append(leftLines, cursorStyle.Render("▶ ")+lbl+textInputStyle.Render(tline))
+					} else {
+						leftLines = append(leftLines, "  "+lbl+textInputStyle.Render(tline))
+					}
+				} else {
+					leftLines = append(leftLines, "                    "+textInputStyle.Render(tline))
+				}
+			}
+			continue
+		}
+
 		// Label.
 		label := fieldLabelStyle.Render(fmt.Sprintf("  %-16s", fieldLabels[i]+":"))
 		line := label
@@ -1963,7 +2018,7 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Blur current input, validate, transition.
 		m.inputs[m.activeInput].Blur()
 
-		if m.inputs[fiPrompt].Value() == "" {
+		if m.promptInput.Value() == "" {
 			m.errMsg = "prompt is required"
 			m.inputs[m.activeInput].Focus()
 			return m, nil
@@ -1980,6 +2035,18 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, priceCmd(m.client, job.ID, job.req)
 
 	default:
+		// Route keystroke to active input: textarea for prompt/negative,
+		// textinput (with rollback masking) for everything else.
+		if m.activeInput == fiPrompt || m.activeInput == fiNegativePrompt {
+			var cmd tea.Cmd
+			if m.activeInput == fiPrompt {
+				m.promptInput, cmd = m.promptInput.Update(msg)
+			} else {
+				m.negPromptInput, cmd = m.negPromptInput.Update(msg)
+			}
+			return m, cmd
+		}
+
 		// Pass keystroke to active textinput.
 		//
 		// Type-to-replace: on a newly-focused numeric field, the first
