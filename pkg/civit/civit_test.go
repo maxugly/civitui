@@ -501,6 +501,47 @@ func TestGenerationRequest_MarshalOmitEmpty(t *testing.T) {
 	}
 }
 
+func TestGenerationRequest_DraftMarshal(t *testing.T) {
+	// Draft has no omitempty, so false must serialize.
+	req := GenerationRequest{
+		Prompt: "test",
+		Model:  "air:test@1",
+		Width:  512,
+		Height: 512,
+		Draft:  true,
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal true failed: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if v, ok := raw["draft"]; !ok {
+		t.Error("draft key missing when true")
+	} else if v != true {
+		t.Errorf("draft expected true, got %v", v)
+	}
+
+	// Default (false) must still serialize — no omitempty.
+	req.Draft = false
+	data, err = json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal false failed: %v", err)
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal false: %v", err)
+	}
+	if v, ok := raw["draft"]; !ok {
+		t.Error("draft key missing when false (no omitempty)")
+	} else if v != false {
+		t.Errorf("draft expected false, got %v", v)
+	}
+}
+
 // ── Context Cancellation ─────────────────────────────────────────────────────
 
 func TestContextCancel(t *testing.T) {

@@ -10,7 +10,7 @@ Following Grok's audit: [specs/api_parameters_audit.md](specs/api_parameters_aud
 - [x] **fluxMode** — dropdown for Flux model variants: Draft / Standard / Krea / Pro 1.1 / Ultra. Only visible when base model is Flux1. Maps labels to AIR URNs internally.
 - [x] **outputFormat** — PNG vs JPEG toggle. Simple dropdown. Default JPEG.
 - [x] **scheduler** — dropdown: simple, discrete, karras, exponential, ays. Hide in advanced section. Model-aware: ZImage only simple/discrete, Flux2Klein all except ays.
-- [x] **draft** — toggle for fast preview mode. Injects draft LoRAs, drops steps to 6–8. "Speed over quality." (Spec: [specs/draft-toggle.md](specs/draft-toggle.md)) — completed in commit pending
+- [x] **draft** — toggle for fast preview mode. Injects draft LoRAs, drops steps to 6–8. "Speed over quality." (Spec: [specs/draft-toggle.md](specs/draft-toggle.md)) — completed in 7e93466, QA passed
 
 ## Active Tasks — Draft Toggle
 
