@@ -1425,12 +1425,11 @@ func (m Model) innerPanel(title, content string) string {
 	var b strings.Builder
 
 	// Top border with title.
-	prefix := "── "
-	tail := strings.Repeat("─", max(0, width-len(prefix)-len(title)-1))
+	prefix := "──"
+	tail := strings.Repeat("─", max(0, width-len(prefix)-len(title)))
 	b.WriteString("┌")
 	b.WriteString(keyStyle.Render(prefix))
 	b.WriteString(keyStyle.Render(title))
-	b.WriteString(" ")
 	b.WriteString(keyStyle.Render(tail))
 	b.WriteString("┐")
 	b.WriteString("\n")
@@ -1493,15 +1492,14 @@ func (m Model) frame(text string, footer string) string {
 
 	// Bottom border with footer intersecting — lazygit style.
 	footerPlain := footer
-	prefix := "── "
-	tailLen := width - len(prefix) - len(footerPlain) - 1
+	prefix := "──"
+	tailLen := width - len(prefix) - len(footerPlain)
 	if tailLen < 1 {
 		tailLen = 1
 	}
 	out.WriteString("╰")
 	out.WriteString(keyStyle.Render(prefix))
-	out.WriteString(footerStyle.Render(footerPlain))
-	out.WriteString(" ")
+	out.WriteString(keyStyle.Render(footerPlain))
 	out.WriteString(strings.Repeat("─", tailLen))
 	out.WriteString("╯")
 
