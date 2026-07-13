@@ -36,11 +36,111 @@ Following Grok's audit: [specs/api_parameters_audit.md](specs/api_parameters_aud
 
 ### Tier 2 — Worth Adding, Medium Effort
 
-- [ ] **denoise** — float input 0.0–1.0 (step 0.05). For img2img. Only show when source image is attached.
-- [ ] **clipSkip** — int input 1–3. SD/SDXL only. Default 2. Hide for Flux/ZImage.
-- [ ] **upscaleWidth + upscaleHeight** — paired int inputs 320–3840. For upscaling workflows.
-- [ ] **experimental** — toggle for SDCPP edge features. Advanced section.
-- [ ] **fluxUltraRaw** — toggle. Only visible when fluxMode is Ultra.
+- [ ] **denoise** — float input 0.0–1.0 (step 0.05). For img2img. Only show when source image is attached. (Spec: [specs/denoise.md](specs/denoise.md))
+- [ ] **clipSkip** — int input 1–3. SD/SDXL only. Default 2. Hide for Flux/ZImage. (Spec: [specs/clip-skip.md](specs/clip-skip.md))
+- [ ] **upscaleWidth + upscaleHeight** — paired int inputs 320–3840. For upscaling workflows. (Spec: [specs/upscale.md](specs/upscale.md))
+- [ ] **experimental** — toggle for SDCPP edge features. Advanced section. (Spec: [specs/experimental.md](specs/experimental.md))
+- [ ] **fluxUltraRaw** — toggle. Only visible when fluxMode is Ultra. (Spec: [specs/flux-ultra-raw.md](specs/flux-ultra-raw.md))
+
+## Active Tasks — Denoising Strength (denoise)
+
+- [x] **Write Specification** — Denoising Strength specification [specs/denoise.md](specs/denoise.md)
+- [ ] **Update Core Engine Struct (`pkg/civit/civit.go`)**
+  - Add `SourceImage` struct and `SourceImage`, `Denoise` fields to `civit.GenerationRequest` struct.
+- [ ] **Update Constants and config (`internal/ui/ui.go`)**
+  - Increment `numFormFields` from 15 to 21.
+  - Add `fiDenoise` constant (value 15).
+  - Update `isReplaceOnFocus()` to return true for `fiDenoise`.
+- [ ] **Initialize and Render Form Field (`internal/ui/ui.go`)**
+  - In `NewModel()`, initialize `inputs[fiDenoise]` with placeholder "0.4" and value "0.4".
+  - In `fieldLabels`, add `"Denoise"` at index 15.
+  - In `fieldHelpText`, add description for the denoise field at index 15.
+  - Define `isFieldVisible()` helper and update `viewConfig()` rendering loop and key navigation to skip `fiDenoise` when no source image is attached.
+- [ ] **Handle User Input and Mapping (`internal/ui/ui.go`)**
+  - Add numeric range validation to `validateNumericFields()` for `fiDenoise`.
+  - In `toRequest()`, parse string value of `inputs[fiDenoise]` into `Denoise` float64 pointer of `civit.GenerationRequest`.
+- [ ] **Add Unit Tests and Verify Quality Gates**
+  - Update `pkg/civit/civit_test.go` to assert correct marshalling of `denoise` and `sourceImage`.
+  - Run quality gates: `go build ./...`, `go vet ./...`, `go test ./... -count=1`.
+
+## Active Tasks — CLIP Skip (clip-skip)
+
+- [x] **Write Specification** — CLIP Skip specification [specs/clip-skip.md](specs/clip-skip.md)
+- [ ] **Update Core Engine Struct (`pkg/civit/civit.go`)**
+  - Add `ClipSkip` integer field (`json:"clipSkip,omitempty"`) to `civit.GenerationRequest` struct.
+- [ ] **Update Constants and config (`internal/ui/ui.go`)**
+  - Add `fiClipSkip` constant (value 16).
+  - Update `isReplaceOnFocus()` to return true for `fiClipSkip`.
+- [ ] **Initialize and Render Form Field (`internal/ui/ui.go`)**
+  - In `NewModel()`, initialize `inputs[fiClipSkip]` with placeholder "2" and value "2".
+  - In `fieldLabels`, add `"CLIP Skip"` at index 16.
+  - In `fieldHelpText`, add description for clip skip at index 16.
+  - Update `isFieldVisible()` helper to hide `fiClipSkip` when the base model is Flux or ZImage.
+- [ ] **Handle User Input and Mapping (`internal/ui/ui.go`)**
+  - Add numeric range validation to `validateNumericFields()` for `fiClipSkip`.
+  - In `toRequest()`, parse string value of `inputs[fiClipSkip]` into `ClipSkip` integer pointer of `civit.GenerationRequest`.
+- [ ] **Add Unit Tests and Verify Quality Gates**
+  - Update `pkg/civit/civit_test.go` to assert correct marshalling of `clipSkip`.
+  - Run quality gates: `go build ./...`, `go vet ./...`, `go test ./... -count=1`.
+
+## Active Tasks — Upscale Dimensions (upscale)
+
+- [x] **Write Specification** — Upscale Dimensions specification [specs/upscale.md](specs/upscale.md)
+- [ ] **Update Core Engine Struct (`pkg/civit/civit.go`)**
+  - Add `UpscaleWidth` and `UpscaleHeight` integer fields to `civit.GenerationRequest`.
+- [ ] **Update Constants and config (`internal/ui/ui.go`)**
+  - Add `fiUpscaleWidth` (value 17) and `fiUpscaleHeight` (value 18) constants.
+  - Update `isReplaceOnFocus()` to return true for both.
+- [ ] **Initialize and Render Form Field (`internal/ui/ui.go`)**
+  - In `NewModel()`, initialize both inputs with placeholder "disabled" and empty value.
+  - In `fieldLabels` and `fieldHelpText`, add labels and descriptions for upscaling width/height.
+- [ ] **Handle User Input and Mapping (`internal/ui/ui.go`)**
+  - Add range validations to `validateNumericFields()`.
+  - In `toRequest()`, parse values into `UpscaleWidth` and `UpscaleHeight` integer pointers.
+- [ ] **Add Unit Tests and Verify Quality Gates**
+  - Verify marshalling of upscaling fields in `civit_test.go`.
+  - Run quality gates: `go build ./...`, `go vet ./...`, `go test ./... -count=1`.
+
+## Active Tasks — Experimental Mode (experimental)
+
+- [x] **Write Specification** — Experimental Mode specification [specs/experimental.md](specs/experimental.md)
+- [ ] **Update Core Engine Struct (`pkg/civit/civit.go`)**
+  - Add `Experimental` boolean field to `civit.GenerationRequest`.
+- [ ] **Update Constants and Preset Config (`internal/ui/ui.go`)**
+  - Add `fiExperimental` constant (value 19).
+  - Update `isPresetsField()` to return true for `fiExperimental`.
+  - Add `experimentalPresets` slice with `true` and `false` options and descriptions.
+- [ ] **Initialize and Render Form Field (`internal/ui/ui.go`)**
+  - In `NewModel()`, initialize `inputs[fiExperimental]` with placeholder "false" and value "false".
+  - In `fieldLabels`, add `"Experimental Mode"` at index 19.
+  - In `fieldHelpText`, add description at index 19.
+  - In `viewConfig()`, add a visual separator `"── Advanced Settings ──"` before advanced fields and add a case for `fiExperimental` to render the preset pane.
+- [ ] **Handle User Input and Mapping (`internal/ui/ui.go`)**
+  - Handle key navigation and preset selection inside `handleConfigKey()`.
+  - In `toRequest()`, parse value into `Experimental` boolean pointer.
+- [ ] **Add Unit Tests and Verify Quality Gates**
+  - Run quality gates: `go build ./...`, `go vet ./...`, `go test ./... -count=1`.
+
+## Active Tasks — Flux Ultra Raw (flux-ultra-raw)
+
+- [x] **Write Specification** — Flux Ultra Raw specification [specs/flux-ultra-raw.md](specs/flux-ultra-raw.md)
+- [ ] **Update Core Engine Struct (`pkg/civit/civit.go`)**
+  - Add `FluxUltraRaw` boolean field to `civit.GenerationRequest`.
+- [ ] **Update Constants and Preset Config (`internal/ui/ui.go`)**
+  - Add `fiFluxUltraRaw` constant (value 20).
+  - Update `isPresetsField()` to return true for `fiFluxUltraRaw`.
+  - Add `fluxUltraRawPresets` slice with `true`/`false`.
+- [ ] **Initialize and Render Form Field (`internal/ui/ui.go`)**
+  - Initialize input in `NewModel()` with placeholder "false" and value "false".
+  - In `fieldLabels`, add `"Flux Ultra Raw"` at index 20.
+  - In `fieldHelpText`, add description at index 20.
+  - Update `isFieldVisible()` to hide `fiFluxUltraRaw` unless `fluxMode` is set to Ultra.
+  - In `viewConfig()`, add case to render presets.
+- [ ] **Handle User Input and Mapping (`internal/ui/ui.go`)**
+  - Handle key navigation and preset selection in `handleConfigKey()`.
+  - In `toRequest()`, parse value into `FluxUltraRaw` boolean pointer.
+- [ ] **Add Unit Tests and Verify Quality Gates**
+  - Run quality gates: `go build ./...`, `go vet ./...`, `go test ./... -count=1`.
 
 ### Bugfix
 
