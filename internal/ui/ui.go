@@ -242,12 +242,12 @@ var fieldLabels = []string{
 	"Quantity",
 	"Output Format",
 	"Seed",
-	"Draft Mode (fast preview)",
+	"Draft Mode",
 	"Denoise",
 	"CLIP Skip",
 	"Upscale Width",
 	"Upscale Height",
-	"Experimental Mode",
+	"Experimental",
 	"Flux Ultra Raw",
 }
 
@@ -648,23 +648,75 @@ func (m *Model) adjustFieldsForEcosystem() {
 	}
 }
 
-// refocusIfHidden moves focus to the first visible field if the current
-// active field has become hidden (e.g. after a model change).
+// navOrder is field indices in column-major display order for tab/↑↓:
+//
+//  1. left column top→bottom (full-width rows + left half of each pair)
+//  2. right column top→bottom (right half of each pair only)
+//  3. wrap
+//
+// Built from fieldOrder so layout and focus stay in sync.
+func navOrder() []int {
+	var left, right []int
+	for i := 0; i < len(fieldOrder); i++ {
+		idx := fieldOrder[i]
+		if idx < 0 {
+			// Pair: left mate, then next entry is the right mate.
+			left = append(left, -idx)
+			i++
+			if i < len(fieldOrder) {
+				right = append(right, fieldOrder[i])
+			}
+			continue
+		}
+		// Full-width row lives only in the left column pass.
+		left = append(left, idx)
+	}
+	out := make([]int, 0, len(left)+len(right))
+	out = append(out, left...)
+	out = append(out, right...)
+	return out
+}
+
+// advanceFocus moves activeInput by dir (+1 next, -1 prev) along navOrder,
+// skipping hidden fields. No-op if none stay visible.
+func (m *Model) advanceFocus(dir int) {
+	order := navOrder()
+	n := len(order)
+	if n == 0 {
+		return
+	}
+	pos := -1
+	for i, fi := range order {
+		if fi == m.activeInput {
+			pos = i
+			break
+		}
+	}
+	// Unknown focus → start of path (or end if walking backward).
+	if pos < 0 {
+		if dir < 0 {
+			pos = 0
+		} else {
+			pos = n - 1
+		}
+	}
+	for step := 0; step < n; step++ {
+		pos = (pos + dir + n) % n
+		if m.isFieldVisible(order[pos]) {
+			m.activeInput = order[pos]
+			return
+		}
+	}
+}
+
+// refocusIfHidden moves focus to the next visible field in display order if
+// the current active field has become hidden (e.g. after a model change).
 func (m *Model) refocusIfHidden() {
 	if m.isFieldVisible(m.activeInput) {
 		return
 	}
 	m.inputs[m.activeInput].Blur()
-	start := m.activeInput
-	for {
-		m.activeInput = (m.activeInput + 1) % numFormFields
-		if m.isFieldVisible(m.activeInput) {
-			break
-		}
-		if m.activeInput == start {
-			break // safety exit: all fields hidden
-		}
-	}
+	m.advanceFocus(+1)
 	m.inputs[m.activeInput].Focus()
 	m.justFocused = isReplaceOnFocus(m.activeInput)
 }
@@ -748,11 +800,13 @@ func newTextInput(placeholder, value string, width int) textinput.Model {
 // Numeric fields carry character-validation callbacks so letters are
 // rejected at the keystroke level.
 func NewModel(client *civit.Client, debug bool) Model {
-	// Compute input widths that fit inside the frame.
-	// The left column has: 2-space indent + 18-char label + ": " + input.
-	// With leftColWidth capped at 80, the input can be at most ~55 chars.
-	// Prompt and negative prompt get wider inputs; others are shorter.
+	// Input widths match form layout:
+	//   full-line fields: ~55 (left col minus cursor+label+gap)
+	//   paired fields: short — each half is only ~half of leftColWidth
+	//   numeric pairs: fixed small widths so columns stay even
 	textWidth := 55
+	pairTextWidth := 12 // scheduler / short preset values in a pair half
+	boolWidth := 6      // true/false
 	promptWidth := 65
 
 	inputs := make([]textinput.Model, numFormFields)
@@ -763,22 +817,22 @@ func NewModel(client *civit.Client, debug bool) Model {
 	inputs[fiModel] = newTextInput("air:flux1:checkpoint:civitai:618692@691639", "air:flux1:checkpoint:civitai:618692@691639", textWidth)
 	inputs[fiFluxMode] = newTextInput("Standard", "urn:air:flux1:checkpoint:civitai:618692@691639", textWidth)
 	inputs[fiSampler] = newTextInput("Euler a", "Euler a", textWidth)
-	inputs[fiScheduler] = newTextInput("EulerA", "EulerA", textWidth)
-	inputs[fiAspectRatio] = newTextInput("1:1", "1:1", 14)
-	inputs[fiWidth] = newTextInput("1024", "1024", 10)
-	inputs[fiHeight] = newTextInput("1024", "1024", 10)
+	inputs[fiScheduler] = newTextInput("EulerA", "EulerA", pairTextWidth)
+	inputs[fiAspectRatio] = newTextInput("1:1", "1:1", 8)
+	inputs[fiWidth] = newTextInput("1024", "1024", 6)
+	inputs[fiHeight] = newTextInput("1024", "1024", 6)
 	inputs[fiSteps] = newTextInput("20", "20", 6)
-	inputs[fiCFGScale] = newTextInput("7.0", "7.0", 8)
-	inputs[fiQuantity] = newTextInput("4", "4", 6)
-	inputs[fiOutputFormat] = newTextInput("jpeg", "jpeg", textWidth)
-	inputs[fiSeed] = newTextInput("random", "", 16)
-	inputs[fiDraft] = newTextInput("false", "false", textWidth)
-	inputs[fiDenoise] = newTextInput("0.4", "", 8)
-	inputs[fiClipSkip] = newTextInput("2", "2", 6)
-	inputs[fiUpscaleWidth] = newTextInput("disabled", "", 10)
-	inputs[fiUpscaleHeight] = newTextInput("disabled", "", 10)
-	inputs[fiExperimental] = newTextInput("false", "false", textWidth)
-	inputs[fiFluxUltraRaw] = newTextInput("false", "false", textWidth)
+	inputs[fiCFGScale] = newTextInput("7.0", "7.0", 6)
+	inputs[fiQuantity] = newTextInput("4", "4", 4)
+	inputs[fiOutputFormat] = newTextInput("jpeg", "jpeg", 8)
+	inputs[fiSeed] = newTextInput("random", "", 12)
+	inputs[fiDraft] = newTextInput("false", "false", boolWidth)
+	inputs[fiDenoise] = newTextInput("0.4", "", 6)
+	inputs[fiClipSkip] = newTextInput("2", "2", 4)
+	inputs[fiUpscaleWidth] = newTextInput("disabled", "", 8)
+	inputs[fiUpscaleHeight] = newTextInput("disabled", "", 8)
+	inputs[fiExperimental] = newTextInput("false", "false", boolWidth)
+	inputs[fiFluxUltraRaw] = newTextInput("false", "false", boolWidth)
 
 	// Character validation: block letters in numeric fields.
 	// empty input is always allowed (resolves to default/zero).
@@ -952,16 +1006,26 @@ func NewModel(client *civit.Client, debug bool) Model {
 	inputs[fiPrompt].Focus()
 
 	// Multi-line text areas for prompt (5 lines) and negative prompt (3 lines).
+	// No line numbers / thick prompt gutter — those fight form column alignment.
 	pa := textarea.New()
 	pa.Placeholder = "Describe the image you want to generate..."
+	pa.ShowLineNumbers = false
+	pa.Prompt = ""
 	pa.SetHeight(5)
 	pa.SetWidth(promptWidth)
+	// Neutral cursor-line style so selection highlight stays even.
+	pa.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	pa.BlurredStyle.CursorLine = lipgloss.NewStyle()
 	pa.Focus()
 
 	npa := textarea.New()
 	npa.Placeholder = "optional — what to avoid"
+	npa.ShowLineNumbers = false
+	npa.Prompt = ""
 	npa.SetHeight(3)
 	npa.SetWidth(promptWidth)
+	npa.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	npa.BlurredStyle.CursorLine = lipgloss.NewStyle()
 	npa.Blur()
 
 	m := Model{
@@ -1215,6 +1279,74 @@ func stripANSI(str string) string {
 	return ansiRegex.ReplaceAllString(str, "")
 }
 
+// Form layout columns (display cells). Every settings row is:
+//
+//	[cursor 2][label formLabelWidth][gap 1][input…]
+//
+// Paired rows split the form column into two equal cells with a 2-cell gap.
+const (
+	formCursorWidth = 2
+	formLabelWidth  = 16 // fits "Negative Prompt:" / "Upscale Height:"
+	formLabelGap    = 1
+	formPairGap     = 2
+)
+
+// displayWidth returns the terminal cell width of s (ANSI-aware).
+func displayWidth(s string) int {
+	return lipgloss.Width(s)
+}
+
+// padToWidth pads s on the right with spaces to exactly width cells,
+// or truncates if already wider. ANSI codes are preserved.
+func padToWidth(s string, width int) string {
+	w := displayWidth(s)
+	if w > width {
+		return truncateToWidth(s, width)
+	}
+	if w < width {
+		return s + strings.Repeat(" ", width-w)
+	}
+	return s
+}
+
+// renderFormCell builds one settings cell: cursor gutter + fixed label + input.
+// The result is padded/truncated to cellWidth when cellWidth > 0.
+// When plain is true, skips per-token ANSI so a later row highlight can own the
+// full line (nested \033[0m from label styles otherwise kills the background).
+func renderFormCell(label, inputView string, active, plain bool, cellWidth int) string {
+	cursor := "  "
+	if active {
+		if plain {
+			cursor = "▶ "
+		} else {
+			cursor = cursorStyle.Render("▶ ")
+		}
+	}
+	// Fixed label column so values always start at the same cell.
+	labText := fmt.Sprintf("%-*s", formLabelWidth, label+":")
+	var lab string
+	if plain {
+		lab = labText
+	} else {
+		lab = fieldLabelStyle.Render(labText)
+	}
+	input := stripANSI(inputView)
+	if !plain {
+		input = textInputStyle.Render(inputView)
+	}
+	cell := cursor + lab + strings.Repeat(" ", formLabelGap) + input
+	if cellWidth > 0 {
+		cell = padToWidth(cell, cellWidth)
+	}
+	return cell
+}
+
+// highlightRow paints a full-width sky-blue selection. Strips inner ANSI first
+// so label/cursor resets cannot punch holes in the background.
+func highlightRow(s string, width int) string {
+	return selectedStyle.Render(padToWidth(stripANSI(s), width))
+}
+
 // wrapText wraps a string to the given column limit, breaking on word
 // boundaries. Returns one string per line (nil for empty input).
 func wrapText(text string, limit int) []string {
@@ -1426,7 +1558,7 @@ func fileDebugLogPath() string {
 }
 
 // View renders the config form at the top and the job queue below,
-// each in its own bordered panel inside a rounded outer frame.
+// each in its own bordered panel (lazygit-style — no outer mega-frame).
 func (m Model) View() string {
 	var sections []string
 
@@ -1463,27 +1595,31 @@ func (m Model) View() string {
 		sections = append(sections, errorStyle.Render(" ✗ "+m.errMsg))
 	}
 
-	// ── Footer ── (renders on the bottom border, not as a section)
-	footer := "ctrl+c quit  •  tab/↑↓ navigate  •  enter generate"
+	// ── Footer ── plain status line under the panels (not a window border).
+	sections = append(sections, dimStyle.Render("ctrl+c quit  •  tab/↑↓ navigate  •  enter generate"))
 
-	// Join with blank lines between sections, then wrap in outer frame.
-	inner := strings.Join(sections, "\n\n")
-	return m.frame(inner, footer)
+	return strings.Join(sections, "\n\n")
 }
 
-// innerPanel wraps content in a square-cornered bordered box with a title
-// on the top border line. Content is indented by 1 inside the border.
-func (m Model) innerPanel(title, content string) string {
-	width := max(m.termWidth, 40) - 6 // outer frame (2) + inner padding (4)
+// panelContentWidth is the inner width of a full-width lazygit panel.
+func (m Model) panelContentWidth() int {
+	width := max(m.termWidth, 40) - 2 // left + right │
 	if width < 30 {
 		width = 30
 	}
+	return width
+}
+
+// innerPanel wraps content in a square-cornered bordered box with a title
+// on the top border line (lazygit panel).
+func (m Model) innerPanel(title, content string) string {
+	width := m.panelContentWidth()
 
 	var b strings.Builder
 
 	// Top border with title.
 	prefix := "──"
-	tail := strings.Repeat("─", max(0, width-len(prefix)-len(title)))
+	tail := strings.Repeat("─", max(0, width-displayWidth(prefix)-displayWidth(title)))
 	b.WriteString("┌")
 	b.WriteString(keyStyle.Render(prefix))
 	b.WriteString(keyStyle.Render(title))
@@ -1491,14 +1627,14 @@ func (m Model) innerPanel(title, content string) string {
 	b.WriteString("┐")
 	b.WriteString("\n")
 
-	// Content lines with side borders.
+	// Content lines with side borders — pad by display width, not byte length.
 	for _, line := range strings.Split(strings.TrimRight(content, "\n"), "\n") {
-		plain := stripANSI(line)
-		if len(plain) > width {
+		w := displayWidth(line)
+		if w > width {
 			line = truncateToWidth(line, width)
-			plain = stripANSI(line)
+			w = displayWidth(line)
 		}
-		pad := width - len(plain)
+		pad := width - w
 		if pad < 0 {
 			pad = 0
 		}
@@ -1515,52 +1651,6 @@ func (m Model) innerPanel(title, content string) string {
 	b.WriteString("┘")
 
 	return b.String()
-}
-
-// frame wraps text in a plain box-drawing-character border with rounded
-// corners (lazygit style). The footer sits on the bottom border line.
-func (m Model) frame(text string, footer string) string {
-	width := max(m.termWidth, 40) - 2
-	var out strings.Builder
-
-	// Top border — rounded corners.
-	out.WriteString("╭")
-	out.WriteString(strings.Repeat("─", max(0, width)))
-	out.WriteString("╮")
-	out.WriteString("\n")
-
-	lines := strings.Split(text, "\n")
-	for _, line := range lines {
-		plain := stripANSI(line)
-		if len(plain) > width {
-			line = truncateToWidth(line, width)
-			plain = stripANSI(line)
-		}
-		pad := width - len(plain)
-		if pad < 0 {
-			pad = 0
-		}
-		out.WriteString("│")
-		out.WriteString(line)
-		out.WriteString(strings.Repeat(" ", pad))
-		out.WriteString("│")
-		out.WriteString("\n")
-	}
-
-	// Bottom border with footer intersecting — lazygit style.
-	footerPlain := footer
-	prefix := "──"
-	tailLen := width - len(prefix) - len(footerPlain)
-	if tailLen < 1 {
-		tailLen = 1
-	}
-	out.WriteString("╰")
-	out.WriteString(keyStyle.Render(prefix))
-	out.WriteString(keyStyle.Render(footerPlain))
-	out.WriteString(strings.Repeat("─", tailLen))
-	out.WriteString("╯")
-
-	return out.String()
 }
 
 // truncateToWidth cuts a string (which may contain ANSI escape codes)
@@ -1645,19 +1735,21 @@ func (m *Model) viewQueue(b *strings.Builder) {
 // ── View Helpers ─────────────────────────────────────────────────────────────
 
 func (m *Model) viewConfig(b *strings.Builder) {
-	// Left-column width: label + cursor + input, padded for alignment.
-	// Capped to fit inside the frame (termWidth minus border and right-pane space).
-	leftColWidth := m.termWidth - 35
+	// Budget form + help against the panel's inner width (no outer frame).
+	panelW := m.panelContentWidth()
+	// Leave room for a 2-cell gap and a usable help pane.
+	leftColWidth := panelW - 36
 	if leftColWidth < 50 {
 		leftColWidth = 50
 	}
 	if leftColWidth > 80 {
 		leftColWidth = 80
 	}
+	if leftColWidth > panelW-18 {
+		leftColWidth = max(panelW-18, 40)
+	}
 
-	// Right-column width: what's left after the left column and the gap.
-	// Dynamically calculated so content fits inside the frame.
-	rightColWidth := m.termWidth - 2 - leftColWidth - 2
+	rightColWidth := panelW - leftColWidth - 2
 	if rightColWidth < 15 {
 		rightColWidth = 15
 	}
@@ -1666,6 +1758,12 @@ func (m *Model) viewConfig(b *strings.Builder) {
 	}
 	wrapAt := rightColWidth - 4 // indent for description lines
 
+	// Half-width for paired settings cells (equal columns + gap).
+	pairHalf := (leftColWidth - formPairGap) / 2
+	if pairHalf < formCursorWidth+formLabelWidth+formLabelGap+6 {
+		pairHalf = formCursorWidth + formLabelWidth + formLabelGap + 6
+	}
+
 	// Render left-column lines in display order (not index order).
 	var leftLines []string
 	si := 0 // index into fieldOrder
@@ -1673,7 +1771,7 @@ func (m *Model) viewConfig(b *strings.Builder) {
 	for si < len(fieldOrder) {
 		idx := fieldOrder[si]
 		if idx < 0 {
-			// Two-column pair: render idx and the next entry together.
+			// Two-column pair: equal-width cells so labels/values line up.
 			left := -idx
 			si++
 			if si >= len(fieldOrder) {
@@ -1687,43 +1785,37 @@ func (m *Model) viewConfig(b *strings.Builder) {
 			}
 			leftActive := m.activeInput == left && !m.inPresetsPane
 			rightActive := m.activeInput == right && !m.inPresetsPane
+			rowActive := leftActive || rightActive
 
-			// Left field label + input.
-			leftLabel := fmt.Sprintf("%s:", fieldLabels[left])
-			leftContent := m.inputs[left].View()
-			leftLine := fmt.Sprintf("  %-14s %s", leftLabel, textInputStyle.Render(leftContent))
-			if leftActive {
-				leftLine = cursorStyle.Render("▶ ") + fmt.Sprintf("%-14s %s", leftLabel, textInputStyle.Render(leftContent))
+			leftCell := renderFormCell(fieldLabels[left], m.inputs[left].View(), leftActive, rowActive, pairHalf)
+			rightCell := renderFormCell(fieldLabels[right], m.inputs[right].View(), rightActive, rowActive, pairHalf)
+			// Dim aspect-ratio half when dimensions no longer match the preset.
+			if right == fiAspectRatio && !m.aspectRatioMatches() {
+				rightCell = dimStyle.Render(stripANSI(rightCell))
+				rightCell = padToWidth(rightCell, pairHalf)
 			}
-			// Right field label + input.
-			rightLabel := fmt.Sprintf("%s:", fieldLabels[right])
-			rightContent := m.inputs[right].View()
-			rightLine := fmt.Sprintf("%-14s %s", rightLabel, textInputStyle.Render(rightContent))
-			if rightActive {
-				rightLine = cursorStyle.Render("▶ ") + rightLine
+			if left == fiAspectRatio && !m.aspectRatioMatches() {
+				leftCell = dimStyle.Render(stripANSI(leftCell))
+				leftCell = padToWidth(leftCell, pairHalf)
 			}
 
-			combined := leftLine + "  " + rightLine
-			if leftActive || rightActive {
-				plain := stripANSI(combined)
-				pad := leftColWidth - len(plain) + rightColWidth + 2
-				if pad > 0 {
-					combined += strings.Repeat(" ", pad)
-				}
-				combined = selectedStyle.Render(combined)
+			combined := leftCell + strings.Repeat(" ", formPairGap) + rightCell
+			if rowActive {
+				combined = highlightRow(combined, leftColWidth)
 			}
 			leftLines = append(leftLines, combined)
 			continue
 		}
 
-		// Single field — render normally.
+		// Single field — full left-column width.
 		i := idx
 		si++
 		if !m.isFieldVisible(i) {
 			continue
 		}
 
-		// Multi-line textarea fields: render each line with label on first only.
+		// Multi-line textarea fields: label on first line only; continuation
+		// lines indent to the same column as the input text.
 		if i == fiPrompt || i == fiNegativePrompt {
 			var ta textarea.Model
 			if i == fiPrompt {
@@ -1733,56 +1825,35 @@ func (m *Model) viewConfig(b *strings.Builder) {
 			}
 			taLines := strings.Split(ta.View(), "\n")
 			isActive := i == m.activeInput && !m.inPresetsPane
+			inputIndent := formCursorWidth + formLabelWidth + formLabelGap
 			for li, tline := range taLines {
 				var l string
 				if li == 0 {
-					lbl := fieldLabelStyle.Render(fmt.Sprintf("  %-16s", fieldLabels[i]+":"))
-					if isActive {
-						l = cursorStyle.Render("▶ ") + lbl + textInputStyle.Render(tline)
-					} else {
-						l = "  " + lbl + textInputStyle.Render(tline)
-					}
+					l = renderFormCell(fieldLabels[i], tline, isActive, isActive, 0)
+				} else if isActive {
+					l = strings.Repeat(" ", inputIndent) + stripANSI(tline)
 				} else {
-					l = "                    " + textInputStyle.Render(tline)
+					l = strings.Repeat(" ", inputIndent) + textInputStyle.Render(tline)
 				}
 				if isActive {
-					// Pad to full width for full-line highlight.
-					plain := stripANSI(l)
-					pad := leftColWidth - len(plain) + rightColWidth + 2
-					if pad > 0 {
-						l += strings.Repeat(" ", pad)
-					}
-					l = selectedStyle.Render(l)
+					l = highlightRow(l, leftColWidth)
 				}
 				leftLines = append(leftLines, l)
 			}
 			continue
 		}
 
-		// Label.
-		label := fieldLabelStyle.Render(fmt.Sprintf("  %-16s", fieldLabels[i]+":"))
-		line := label
 		isActive := i == m.activeInput && !m.inPresetsPane
-		if isActive {
-			line = cursorStyle.Render("▶ ") + label
-		} else {
-			line = "  " + label
-		}
-		line += textInputStyle.Render(m.inputs[i].View())
+		line := renderFormCell(fieldLabels[i], m.inputs[i].View(), isActive, isActive, 0)
 
 		// Dim the aspect ratio field when width/height have drifted
-		// from the selected preset's dimensions.
+		// from the selected preset's dimensions (solo path; usually paired).
 		if i == fiAspectRatio && !m.aspectRatioMatches() {
 			line = dimStyle.Render(stripANSI(line))
 		}
 
 		if isActive {
-			plain := stripANSI(line)
-			pad := leftColWidth - len(plain) + rightColWidth + 2
-			if pad > 0 {
-				line += strings.Repeat(" ", pad)
-			}
-			line = selectedStyle.Render(line)
+			line = highlightRow(line, leftColWidth)
 		}
 
 		leftLines = append(leftLines, line)
@@ -1916,15 +1987,16 @@ func (m *Model) viewConfig(b *strings.Builder) {
 			right = rightLines[row]
 		}
 
-		// Pad left column so right column starts at a consistent position.
-		leftPlain := stripANSI(left)
-		pad := leftColWidth - len(leftPlain)
-		if pad < 2 {
-			pad = 2
+		// Pad left column so the help/presets pane starts at a fixed column.
+		// Selected rows may already be wider (full-row highlight); leave those alone.
+		if displayWidth(left) < leftColWidth {
+			left = padToWidth(left, leftColWidth)
 		}
 		b.WriteString(left)
-		b.WriteString(strings.Repeat(" ", pad))
-		b.WriteString(right)
+		if right != "" {
+			b.WriteString("  ")
+			b.WriteString(right)
+		}
 		b.WriteString("\n")
 	}
 }
@@ -2078,35 +2150,17 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch key {
 	case "tab", "down":
-		// Blur current, focus next visible field.
+		// Next visible field in visual order (matches on-screen layout).
 		m.inputs[m.activeInput].Blur()
-		startInput := m.activeInput
-		for {
-			m.activeInput = (m.activeInput + 1) % numFormFields
-			if m.isFieldVisible(m.activeInput) {
-				break
-			}
-			if m.activeInput == startInput {
-				break // safety exit: all fields hidden
-			}
-		}
+		m.advanceFocus(+1)
 		m.inputs[m.activeInput].Focus()
 		m.justFocused = isReplaceOnFocus(m.activeInput)
 		return m, nil
 
 	case "shift+tab", "up":
-		// Blur current, focus previous visible field.
+		// Previous visible field in visual order.
 		m.inputs[m.activeInput].Blur()
-		startInput := m.activeInput
-		for {
-			m.activeInput = (m.activeInput - 1 + numFormFields) % numFormFields
-			if m.isFieldVisible(m.activeInput) {
-				break
-			}
-			if m.activeInput == startInput {
-				break // safety exit
-			}
-		}
+		m.advanceFocus(-1)
 		m.inputs[m.activeInput].Focus()
 		m.justFocused = isReplaceOnFocus(m.activeInput)
 		return m, nil
