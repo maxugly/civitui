@@ -85,6 +85,33 @@ type Job struct {
 // numFormFields is the count of editable fields in the config form.
 const numFormFields = 21
 
+// fieldOrder defines the display order and two-column pairing in viewConfig.
+// Positive indices render alone (full width). Negative pairs render
+// side-by-side: the two positive indices share one line.
+var fieldOrder = []int{
+	fiPrompt,           // alone — multi-line textarea
+	fiNegativePrompt,   // alone — multi-line textarea
+	fiModel,            // alone — presets
+	fiFluxMode,         // alone — presets
+	fiSampler,          // alone — presets
+	-fiScheduler,       // pair with AspectRatio
+	fiAspectRatio,      // (paired above)
+	-fiWidth,           // pair with Height
+	fiHeight,           // (paired above)
+	-fiSteps,           // pair with CFG Scale
+	fiCFGScale,         // (paired above)
+	-fiQuantity,        // pair with Seed
+	fiSeed,             // (paired above)
+	fiOutputFormat,     // alone — presets
+	-fiDenoise,         // pair with CLIP Skip
+	fiClipSkip,         // (paired above)
+	-fiUpscaleWidth,    // pair with Upscale Height
+	fiUpscaleHeight,    // (paired above)
+	-fiExperimental,    // pair with Flux Ultra Raw
+	fiFluxUltraRaw,     // (paired above)
+	fiDraft,            // alone — presets, bottom
+}
+
 // Form field indices into the inputs slice.
 const (
 	fiPrompt         = iota // 0 — text
@@ -1639,11 +1666,59 @@ func (m *Model) viewConfig(b *strings.Builder) {
 	}
 	wrapAt := rightColWidth - 4 // indent for description lines
 
-	// Render left-column lines into a slice.
+	// Render left-column lines in display order (not index order).
 	var leftLines []string
+	si := 0 // index into fieldOrder
 
-	for i, input := range m.inputs {
-		// Skip conditionally hidden fields.
+	for si < len(fieldOrder) {
+		idx := fieldOrder[si]
+		if idx < 0 {
+			// Two-column pair: render idx and the next entry together.
+			left := -idx
+			si++
+			if si >= len(fieldOrder) {
+				break
+			}
+			right := fieldOrder[si]
+			si++
+
+			if !m.isFieldVisible(left) && !m.isFieldVisible(right) {
+				continue
+			}
+			leftActive := m.activeInput == left && !m.inPresetsPane
+			rightActive := m.activeInput == right && !m.inPresetsPane
+
+			// Left field label + input.
+			leftLabel := fmt.Sprintf("%s:", fieldLabels[left])
+			leftContent := m.inputs[left].View()
+			leftLine := fmt.Sprintf("  %-14s %s", leftLabel, textInputStyle.Render(leftContent))
+			if leftActive {
+				leftLine = cursorStyle.Render("▶ ") + fmt.Sprintf("%-14s %s", leftLabel, textInputStyle.Render(leftContent))
+			}
+			// Right field label + input.
+			rightLabel := fmt.Sprintf("%s:", fieldLabels[right])
+			rightContent := m.inputs[right].View()
+			rightLine := fmt.Sprintf("%-14s %s", rightLabel, textInputStyle.Render(rightContent))
+			if rightActive {
+				rightLine = cursorStyle.Render("▶ ") + rightLine
+			}
+
+			combined := leftLine + "  " + rightLine
+			if leftActive || rightActive {
+				plain := stripANSI(combined)
+				pad := leftColWidth - len(plain) + rightColWidth + 2
+				if pad > 0 {
+					combined += strings.Repeat(" ", pad)
+				}
+				combined = selectedStyle.Render(combined)
+			}
+			leftLines = append(leftLines, combined)
+			continue
+		}
+
+		// Single field — render normally.
+		i := idx
+		si++
 		if !m.isFieldVisible(i) {
 			continue
 		}
@@ -1693,7 +1768,7 @@ func (m *Model) viewConfig(b *strings.Builder) {
 		} else {
 			line = "  " + label
 		}
-		line += textInputStyle.Render(input.View())
+		line += textInputStyle.Render(m.inputs[i].View())
 
 		// Dim the aspect ratio field when width/height have drifted
 		// from the selected preset's dimensions.
