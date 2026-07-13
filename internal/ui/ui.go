@@ -1,12 +1,8 @@
 // Package ui provides the Bubble Tea terminal user interface for civitui.
 //
-// The UI implements a 7-phase state machine that walks the user through
-// the CivitAI generation pipeline:
-//
-//	config → pricing → confirm → submitting → polling → downloading → done
-//
-// Each phase has its own view and input handling. Async API calls are
-// dispatched as tea.Cmd and results arrive as typed messages.
+// The UI renders a config form and an inline job queue in a single-window
+// layout (lazygit-style). Async API calls are dispatched as tea.Cmd and
+// route back to the correct job via a jobID carried in every message.
 //
 // Form input uses Charm's bubbles/textinput for ergonomic text editing
 // (cursor movement, home/end, backspace, selection) while preserving
@@ -27,41 +23,57 @@ import (
 	"github.com/m/civitui/pkg/civit"
 )
 
-// ── Phase ────────────────────────────────────────────────────────────────────
+// ── Job ───────────────────────────────────────────────────────────────────────
 
-// Phase is a step in the generation pipeline state machine.
-type Phase int
+// JobStatus tracks the lifecycle of a single generation request.
+type JobStatus int
 
 const (
-	PhaseConfig      Phase = iota // user fills in generation parameters
-	PhasePricing                  // waiting for CalculatePrice
-	PhaseConfirm                  // showing cost, awaiting y/n
-	PhaseSubmitting               // waiting for SubmitJob
-	PhasePolling                  // polling job status
-	PhaseDownloading              // downloading completed images
-	PhaseDone                     // showing results
+	JobPricing     JobStatus = iota // waiting for CalculatePrice
+	JobSubmitting                   // waiting for SubmitJob
+	JobPolling                      // polling for completion
+	JobDownloading                  // downloading images
+	JobDone                         // completed successfully
+	JobFailed                       // error at any stage
 )
 
-// String returns a human-readable phase label.
-func (p Phase) String() string {
-	switch p {
-	case PhaseConfig:
-		return "CONFIG"
-	case PhasePricing:
-		return "PRICING"
-	case PhaseConfirm:
-		return "CONFIRM"
-	case PhaseSubmitting:
-		return "SUBMITTING"
-	case PhasePolling:
-		return "POLLING"
-	case PhaseDownloading:
-		return "DOWNLOADING"
-	case PhaseDone:
-		return "DONE"
+// String returns a human-readable job status label.
+func (s JobStatus) String() string {
+	switch s {
+	case JobPricing:
+		return "pricing..."
+	case JobSubmitting:
+		return "submitting..."
+	case JobPolling:
+		return "polling..."
+	case JobDownloading:
+		return "downloading..."
+	case JobDone:
+		return "done"
+	case JobFailed:
+		return "failed"
 	default:
-		return "UNKNOWN"
+		return "unknown"
 	}
+}
+
+// Job represents a single generation request and its lifecycle.
+// All pipeline state (cost, jobID, poll results, download paths) lives
+// inside the job, not on the global Model.
+type Job struct {
+	ID     string // unique identifier (auto-incrementing counter as string)
+	Prompt string // truncated prompt for display
+	Cost   int    // buzz cost (0 until pricing completes)
+	Status JobStatus
+	ErrMsg string // error message if failed
+
+	// Internal pipeline state
+	req      civit.GenerationRequest
+	apiJobID string
+	pollResp *civit.WorkflowResponse
+	pollTick int
+	dlPaths  []string
+	dlErrors []string
 }
 
 // numFormFields is the count of editable fields in the config form.
@@ -126,12 +138,9 @@ type Model struct {
 	// client is the headless API engine injected at startup.
 	client *civit.Client
 
-	// phase tracks the current step in the generation pipeline.
-	phase Phase
-
 	// ── Configuration Panel (form fields) ──
 	//
-	// inputs holds all 11 textinput models for the config form.
+	// inputs holds all textinput models for the config form.
 	// activeInput indexes the currently-focused field (0..numFormFields-1).
 	inputs      []textinput.Model
 	activeInput int
@@ -149,18 +158,14 @@ type Model struct {
 	inPresetsPane bool
 	activePreset  int // currently highlighted index in the preset list
 
-	// ── Pipeline state ──
-
-	cost     int                    // buzz cost from whatif
-	jobID    string                 // workflow ID from SubmitJob
-	pollResp *civit.WorkflowResponse // latest poll result
-	pollTick int                    // poll iteration counter
-
-	// ── Results ──
-
-	downloadPaths  []string
-	downloadErrors []string
-	errMsg         string
+	// ── Job queue ──
+	//
+	// jobs holds all submitted generation requests. Newest at the bottom.
+	// Each job manages its own pipeline state (cost, API job ID, poll
+	// results, download paths) independently. Multiple jobs can be in
+	// different stages simultaneously.
+	jobs      []*Job
+	nextJobID int // auto-incrementing counter
 
 	// ── Terminal geometry ──
 
@@ -170,6 +175,9 @@ type Model struct {
 	// ── Spinner ──
 
 	spinnerFrame int
+
+	// errMsg shows a transient error at the bottom of the config form.
+	errMsg string
 }
 
 // spinnerFrames for the waiting animations.
@@ -895,7 +903,6 @@ func NewModel(client *civit.Client) Model {
 
 	return Model{
 		client:      client,
-		phase:       PhaseConfig,
 		inputs:      inputs,
 		activeInput: 0,
 	}
@@ -995,11 +1002,9 @@ func nilIf[T any](cond bool, val *T) *T {
 	return val
 }
 
-// refocusConfig snaps the phase back to config and re-focuses the active input.
-// Use this on every return-to-config path (errors, confirm cancel) so the
-// user's keystrokes land somewhere instead of vanishing into a blurred field.
+// refocusConfig re-focuses the active input and clears presets pane state.
+// Called when returning to the config form from errors or navigation.
 func (m *Model) refocusConfig() {
-	m.phase = PhaseConfig
 	m.inPresetsPane = false
 	m.inputs[m.activeInput].Focus()
 }
@@ -1188,78 +1193,90 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.spinnerFrame = (m.spinnerFrame + 1) % len(spinnerFrames)
-		// Only return tick command if we're in a phase that needs the spinner.
-		if m.phase == PhasePricing || m.phase == PhaseSubmitting ||
-			m.phase == PhasePolling || m.phase == PhaseDownloading {
-			return m, tickCmd()
-		}
+		// Always keep the spinner ticking — it's used by the job queue.
+		return m, tickCmd()
 
 	case priceResultMsg:
-		if msg.err != nil {
-			m.errMsg = msg.err.Error()
-			m.refocusConfig()
-		} else {
-			m.cost = msg.cost
-			m.phase = PhaseConfirm
+		job := m.findJob(msg.jobID)
+		if job == nil {
+			return m, nil
 		}
-		return m, nil
+		if msg.err != nil {
+			job.Status = JobFailed
+			job.ErrMsg = msg.err.Error()
+		} else {
+			job.Cost = msg.cost
+			job.Status = JobSubmitting
+			return m, submitCmd(m.client, msg.jobID, job.req)
+		}
 
 	case submitResultMsg:
+		job := m.findJob(msg.jobID)
+		if job == nil {
+			return m, nil
+		}
 		if msg.err != nil {
-			m.errMsg = msg.err.Error()
-			m.refocusConfig()
+			job.Status = JobFailed
+			job.ErrMsg = msg.err.Error()
 		} else {
-			m.jobID = msg.jobID
-			m.pollTick = 0
-			m.downloadPaths = nil
-			m.downloadErrors = nil
-			m.phase = PhasePolling
-			return m, pollCmd(m.client, msg.jobID)
+			job.apiJobID = msg.apiJobID
+			job.pollTick = 0
+			job.dlPaths = nil
+			job.dlErrors = nil
+			job.Status = JobPolling
+			return m, pollCmd(m.client, msg.jobID, msg.apiJobID)
 		}
 
 	case pollResultMsg:
-		if msg.err != nil {
-			m.errMsg = msg.err.Error()
-			m.refocusConfig()
+		job := m.findJob(msg.jobID)
+		if job == nil {
 			return m, nil
 		}
-		m.pollResp = msg.resp
-		m.pollTick++
+		if msg.err != nil {
+			job.Status = JobFailed
+			job.ErrMsg = msg.err.Error()
+			return m, nil
+		}
+		job.pollResp = msg.resp
+		job.pollTick++
 
 		switch msg.resp.Status {
 		case "succeeded":
-			m.downloadPaths = nil
-			m.downloadErrors = nil
-			m.phase = PhaseDownloading
-			return m, downloadCmd(m.client, msg.resp)
+			job.dlPaths = nil
+			job.dlErrors = nil
+			job.Status = JobDownloading
+			return m, downloadCmd(m.client, msg.jobID, msg.resp)
 		case "failed", "cancelled":
-			m.errMsg = fmt.Sprintf("job %s", msg.resp.Status)
-			m.refocusConfig()
+			job.Status = JobFailed
+			job.ErrMsg = fmt.Sprintf("job %s", msg.resp.Status)
 			return m, nil
 		default:
-			return m, pollCmd(m.client, m.jobID)
+			return m, pollCmd(m.client, msg.jobID, job.apiJobID)
 		}
 
 	case downloadResultMsg:
+		job := m.findJob(msg.jobID)
+		if job == nil {
+			return m, nil
+		}
 		if msg.err != nil {
-			m.downloadErrors = append(m.downloadErrors, msg.err.Error())
+			job.dlErrors = append(job.dlErrors, msg.err.Error())
 		} else {
-			m.downloadPaths = append(m.downloadPaths, msg.path)
+			job.dlPaths = append(job.dlPaths, msg.path)
 		}
 		expected := 0
-		if m.pollResp != nil && len(m.pollResp.Steps) > 0 {
-			expected = len(m.pollResp.Steps[0].Output.Images)
+		if job.pollResp != nil && len(job.pollResp.Steps) > 0 {
+			expected = len(job.pollResp.Steps[0].Output.Images)
 		}
-		done := len(m.downloadPaths) + len(m.downloadErrors)
+		done := len(job.dlPaths) + len(job.dlErrors)
 		if done >= expected && expected > 0 {
-			m.phase = PhaseDone
+			job.Status = JobDone
 		}
 		return m, nil
 	}
 
-	// Route Blink and other internal messages to the active textinput
-	// during the config phase so cursor blinking works.
-	if m.phase == PhaseConfig && !m.inPresetsPane {
+	// Route Blink and other internal messages to the active textinput.
+	if !m.inPresetsPane {
 		m.inputs[m.activeInput], cmd = m.inputs[m.activeInput].Update(msg)
 		return m, cmd
 	}
@@ -1267,31 +1284,54 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// View renders the current UI based on the active phase.
+// findJob locates a job by its ID. Returns nil if not found.
+func (m *Model) findJob(id string) *Job {
+	for _, j := range m.jobs {
+		if j.ID == id {
+			return j
+		}
+	}
+	return nil
+}
+
+// createJob builds a new Job from the current form state and assigns it a unique ID.
+func (m *Model) createJob() *Job {
+	id := fmt.Sprintf("%d", m.nextJobID)
+	m.nextJobID++
+	prompt := m.inputs[fiPrompt].Value()
+	if len(prompt) > 40 {
+		prompt = prompt[:37] + "..."
+	}
+	return &Job{
+		ID:     id,
+		Prompt: prompt,
+		Status: JobPricing,
+		req:    m.toRequest(),
+	}
+}
+
+// View renders the config form at the top and the job queue below.
+// The config form is always visible and editable. Jobs stack in the
+// queue with live status updates.
 func (m Model) View() string {
 	var b strings.Builder
 
 	// Header bar.
 	b.WriteString(headerStyle.Render(" civitui "))
 	b.WriteString("  ")
-	b.WriteString(phaseStyle.Render(fmt.Sprintf(" [%s] ", m.phase)))
+	b.WriteString(phaseStyle.Render(" [CONFIG] "))
 	b.WriteString("\n\n")
 
-	switch m.phase {
-	case PhaseConfig:
-		m.viewConfig(&b)
-	case PhasePricing:
-		m.viewPricing(&b)
-	case PhaseConfirm:
-		m.viewConfirm(&b)
-	case PhaseSubmitting:
-		m.viewSubmitting(&b)
-	case PhasePolling:
-		m.viewPolling(&b)
-	case PhaseDownloading:
-		m.viewDownloading(&b)
-	case PhaseDone:
-		m.viewDone(&b)
+	// Config form — always visible.
+	m.viewConfig(&b)
+
+	// Job queue.
+	if len(m.jobs) > 0 {
+		b.WriteString("\n")
+		b.WriteString(dimStyle.Render("── Generation Queue "))
+		b.WriteString(dimStyle.Render(strings.Repeat("─", max(0, m.termWidth-23))))
+		b.WriteString("\n")
+		m.viewQueue(&b)
 	}
 
 	// Error bar.
@@ -1301,9 +1341,56 @@ func (m Model) View() string {
 	}
 
 	// Footer.
-	b.WriteString(fmt.Sprintf("\n\n%s", footerStyle.Render("ctrl+c quit  •  tab/↑↓ navigate  •  enter confirm")))
+	b.WriteString(fmt.Sprintf("\n\n%s", footerStyle.Render("ctrl+c quit  •  tab/↑↓ navigate  •  enter generate")))
 
 	return b.String()
+}
+
+// viewQueue renders each job in the queue as a single status line.
+func (m *Model) viewQueue(b *strings.Builder) {
+	for _, job := range m.jobs {
+		// Status icon.
+		switch job.Status {
+		case JobDone:
+			b.WriteString(successStyle.Render(" ✓ "))
+		case JobFailed:
+			b.WriteString(errorStyle.Render(" ✗ "))
+		default:
+			b.WriteString(loadingStyle.Render(" " + spinnerFrames[m.spinnerFrame] + " "))
+		}
+
+		// Prompt (truncated to 40 chars).
+		display := job.Prompt
+		if display == "" {
+			display = "(no prompt)"
+		}
+		b.WriteString(fmt.Sprintf("%-42s", fmt.Sprintf("%q", display)))
+
+		// Cost.
+		if job.Cost > 0 {
+			b.WriteString(costStyle.Render(fmt.Sprintf(" %dⓑ  ", job.Cost)))
+		} else if job.Status == JobFailed {
+			b.WriteString(dimStyle.Render("  -   "))
+		} else {
+			b.WriteString(dimStyle.Render(" ...  "))
+		}
+
+		// Status text.
+		switch job.Status {
+		case JobDone:
+			if len(job.dlPaths) > 0 {
+				b.WriteString(successStyle.Render(job.dlPaths[0]))
+			} else {
+				b.WriteString(successStyle.Render("done"))
+			}
+		case JobFailed:
+			b.WriteString(errorStyle.Render(job.ErrMsg))
+		default:
+			b.WriteString(loadingStyle.Render(job.Status.String()))
+		}
+
+		b.WriteString("\n")
+	}
 }
 
 // ── View Helpers ─────────────────────────────────────────────────────────────
@@ -1482,72 +1569,14 @@ func (m *Model) viewConfig(b *strings.Builder) {
 	}
 }
 
-func (m *Model) viewPricing(b *strings.Builder) {
-	b.WriteString(loadingStyle.Render("  " + spinnerFrames[m.spinnerFrame] + " Calculating price..."))
-}
-
-func (m *Model) viewConfirm(b *strings.Builder) {
-	b.WriteString(fmt.Sprintf("  This generation will cost %s Buzz.\n\n", costStyle.Render(strconv.Itoa(m.cost))))
-	b.WriteString("  Press ")
-	b.WriteString(keyStyle.Render("y"))
-	b.WriteString(" to confirm, ")
-	b.WriteString(keyStyle.Render("n"))
-	b.WriteString(" to cancel.")
-}
-
-func (m *Model) viewSubmitting(b *strings.Builder) {
-	b.WriteString(loadingStyle.Render("  " + spinnerFrames[m.spinnerFrame] + " Submitting job..."))
-}
-
-func (m *Model) viewPolling(b *strings.Builder) {
-	b.WriteString(loadingStyle.Render("  " + spinnerFrames[m.spinnerFrame] + " Waiting for results"))
-	if m.jobID != "" {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("  [%s]", m.jobID[:min(8, len(m.jobID))])))
-	}
-	b.WriteString(fmt.Sprintf("  poll #%d", m.pollTick))
-
-	if m.pollResp != nil {
-		b.WriteString(fmt.Sprintf("  status: %s", statusStyle.Render(m.pollResp.Status)))
-	}
-}
-
-func (m *Model) viewDownloading(b *strings.Builder) {
-	b.WriteString(loadingStyle.Render("  " + spinnerFrames[m.spinnerFrame] + " Downloading images..."))
-	if len(m.downloadPaths) > 0 {
-		b.WriteString(fmt.Sprintf("  %d/%d", len(m.downloadPaths), len(m.downloadPaths)+len(m.downloadErrors)))
-	}
-}
-
-func (m *Model) viewDone(b *strings.Builder) {
-	b.WriteString(successStyle.Render("  ✓ Generation complete!"))
-	b.WriteString("\n\n")
-
-	// Canvas / Viewport placeholder showing downloaded images.
-	b.WriteString(canvasStyle.Render("┌─ Canvas / Viewport ───────────────────────────────┐"))
-	b.WriteString("\n")
-
-	if len(m.downloadPaths) > 0 {
-		for i, p := range m.downloadPaths {
-			b.WriteString(canvasStyle.Render(fmt.Sprintf("│  [%d] %s", i+1, p)))
-			b.WriteString("\n")
-		}
-		for i := len(m.downloadPaths); i < 6; i++ {
-			b.WriteString(canvasStyle.Render("│"))
-			b.WriteString("\n")
-		}
-	} else {
-		for i := 0; i < 3; i++ {
-			b.WriteString(canvasStyle.Render("│  (image viewport — results appear here)"))
-			b.WriteString("\n")
-		}
-	}
-	b.WriteString(canvasStyle.Render("└──────────────────────────────────────────────────┘"))
-
-	if len(m.downloadErrors) > 0 {
-		b.WriteString("\n\n")
-		b.WriteString(errorStyle.Render(fmt.Sprintf("  %d download(s) failed", len(m.downloadErrors))))
-	}
-}
+// Deprecated view helpers — replaced by viewQueue in the lazygit layout.
+// Kept as no-ops for compilation; will be removed in cleanup pass.
+func (m *Model) viewPricing(b *strings.Builder)     {}
+func (m *Model) viewConfirm(b *strings.Builder)     {}
+func (m *Model) viewSubmitting(b *strings.Builder)  {}
+func (m *Model) viewPolling(b *strings.Builder)     {}
+func (m *Model) viewDownloading(b *strings.Builder) {}
+func (m *Model) viewDone(b *strings.Builder)        {}
 
 // ── Key Handling ─────────────────────────────────────────────────────────────
 
@@ -1558,34 +1587,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":
-		switch m.phase {
-		case PhaseConfig:
-			if m.inPresetsPane {
-				m.inPresetsPane = false
-				return m, nil
-			}
-			return m, tea.Quit
-		case PhaseConfirm, PhaseDone:
-			m.refocusConfig()
-			return m, nil
-		default:
-			return m, tea.Quit
-		}
-	}
-
-	switch m.phase {
-	case PhaseConfig:
-		return m.handleConfigKey(msg)
-	case PhaseConfirm:
-		return m.handleConfirmKey(key)
-	case PhaseDone:
-		if key == "q" || key == "enter" {
-			m.refocusConfig()
+		if m.inPresetsPane {
+			m.inPresetsPane = false
 			return m, nil
 		}
+		return m, tea.Quit
 	}
 
-	return m, nil
+	// All config navigation — tab, shift+tab, up, down, enter, presets.
+	return m.handleConfigKey(msg)
 }
 
 func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1742,8 +1752,9 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.errMsg = ""
-		m.phase = PhasePricing
-		return m, priceCmd(m.client, m.toRequest())
+		job := m.createJob()
+		m.jobs = append(m.jobs, job)
+		return m, priceCmd(m.client, job.ID, job.req)
 
 	default:
 		// Pass keystroke to active textinput.
@@ -1819,14 +1830,8 @@ func (m *Model) filteredSchedulerPresets() []SchedulerPreset {
 }
 
 func (m Model) handleConfirmKey(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "y", "Y":
-		m.phase = PhaseSubmitting
-		return m, submitCmd(m.client, m.toRequest())
-	case "n", "N":
-		m.refocusConfig()
-		return m, nil
-	}
+	// Confirm phase removed — jobs auto-submit after pricing.
+	// Left as no-op for backward compat; never called in lazygit layout.
 	return m, nil
 }
 
@@ -1834,57 +1839,61 @@ func (m Model) handleConfirmKey(key string) (tea.Model, tea.Cmd) {
 
 // priceResultMsg is sent when CalculatePrice completes.
 type priceResultMsg struct {
-	cost int
-	err  error
+	jobID string
+	cost  int
+	err   error
 }
 
-func priceCmd(client *civit.Client, req civit.GenerationRequest) tea.Cmd {
+func priceCmd(client *civit.Client, jobID string, req civit.GenerationRequest) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		cost, err := client.CalculatePrice(ctx, req)
-		return priceResultMsg{cost: cost, err: err}
+		return priceResultMsg{jobID: jobID, cost: cost, err: err}
 	}
 }
 
 // submitResultMsg is sent when SubmitJob completes.
 type submitResultMsg struct {
-	jobID string
-	err   error
+	jobID    string
+	apiJobID string
+	err      error
 }
 
-func submitCmd(client *civit.Client, req civit.GenerationRequest) tea.Cmd {
+func submitCmd(client *civit.Client, jobID string, req civit.GenerationRequest) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		jobID, err := client.SubmitJob(ctx, req)
-		return submitResultMsg{jobID: jobID, err: err}
+		apiJobID, err := client.SubmitJob(ctx, req)
+		return submitResultMsg{jobID: jobID, apiJobID: apiJobID, err: err}
 	}
 }
 
 // pollResultMsg is sent each time PollJobStatus completes.
 type pollResultMsg struct {
-	resp *civit.WorkflowResponse
-	err  error
+	jobID string
+	resp  *civit.WorkflowResponse
+	err   error
 }
 
-func pollCmd(client *civit.Client, jobID string) tea.Cmd {
+func pollCmd(client *civit.Client, jobID string, apiJobID string) tea.Cmd {
 	return func() tea.Msg {
 		time.Sleep(2 * time.Second)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		resp, err := client.PollJobStatus(ctx, jobID)
-		return pollResultMsg{resp: resp, err: err}
+		resp, err := client.PollJobStatus(ctx, apiJobID)
+		return pollResultMsg{jobID: jobID, resp: resp, err: err}
 	}
 }
 
 // downloadResultMsg is sent each time an image download completes.
 type downloadResultMsg struct {
-	path string
-	err  error
+	jobID string
+	path  string
+	err   error
 }
 
-func downloadCmd(client *civit.Client, resp *civit.WorkflowResponse) tea.Cmd {
+func downloadCmd(client *civit.Client, jobID string, resp *civit.WorkflowResponse) tea.Cmd {
 	// Collect all image URLs from completed steps.
 	var images []civit.Image
 	for _, step := range resp.Steps {
@@ -1910,7 +1919,7 @@ func downloadCmd(client *civit.Client, resp *civit.WorkflowResponse) tea.Cmd {
 			defer cancel()
 			dest := fmt.Sprintf("civitai_output_%s_%d.png", resp.ID[:min(8, len(resp.ID))], idx+1)
 			err := client.DownloadImage(ctx, img.URL, dest)
-			return downloadResultMsg{path: dest, err: err}
+			return downloadResultMsg{jobID: jobID, path: dest, err: err}
 		})
 	}
 	return tea.Batch(cmds...)
