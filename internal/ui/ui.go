@@ -517,7 +517,7 @@ func (m *Model) isFieldVisible(idx int) bool {
 		eco := m.currentEcosystem()
 		return eco != "flux1" && eco != "flux2" && eco != "zimage"
 	case fiFluxUltraRaw:
-		return m.inputs[fiFluxMode].Value() == "urn:air:flux1:checkpoint:civitai:618692@1088507"
+		return m.currentEcosystem() == "flux1" && m.inputs[fiFluxMode].Value() == "urn:air:flux1:checkpoint:civitai:618692@1088507"
 	case fiFluxMode:
 		return m.currentEcosystem() == "flux1"
 	case fiSampler:
@@ -530,18 +530,113 @@ func (m *Model) isFieldVisible(idx int) bool {
 // currentEcosystem returns the ecosystem of the currently selected model.
 // Keys off the modelPreset's Ecosystem if matched, or parses the AIR string.
 func (m *Model) currentEcosystem() string {
-	val := m.inputs[fiModel].Value()
+	return ecosystemForAIR(m.inputs[fiModel].Value())
+}
+
+// adjustFieldsForEcosystem resets fields that became invalid after a model change.
+// Called whenever the model is changed (preset selection or custom AIR entry).
+func (m *Model) adjustFieldsForEcosystem() {
+	eco := m.currentEcosystem()
+
+	// Reset sampler if stale
+	if m.isFieldVisible(fiSampler) {
+		filtered := m.filteredSamplerPresets()
+		if len(filtered) > 0 {
+			valid := false
+			cur := m.inputs[fiSampler].Value()
+			for _, p := range filtered {
+				v := p.ValSD
+				if eco == "flux2" {
+					v = p.ValFlux2
+				} else if eco == "zimage" {
+					v = p.ValZImage
+				}
+				if v == cur {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				// Reset to first valid preset
+				v := filtered[0].ValSD
+				if eco == "flux2" {
+					v = filtered[0].ValFlux2
+				} else if eco == "zimage" {
+					v = filtered[0].ValZImage
+				}
+				m.inputs[fiSampler].SetValue(v)
+			}
+		}
+	} else {
+		m.inputs[fiSampler].SetValue("")
+	}
+
+	// Reset scheduler if stale
+	if len(m.filteredSchedulerPresets()) > 0 {
+		cur := m.inputs[fiScheduler].Value()
+		valid := false
+		for _, s := range m.filteredSchedulerPresets() {
+			if s.Scheduler == cur {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			m.inputs[fiScheduler].SetValue(m.filteredSchedulerPresets()[0].Scheduler)
+		}
+	}
+
+	// Reset Flux-specific fields when leaving Flux
+	if eco != "flux1" {
+		m.inputs[fiFluxMode].SetValue("")
+		m.inputs[fiFluxUltraRaw].SetValue("false")
+	}
+}
+
+// refocusIfHidden moves focus to the first visible field if the current
+// active field has become hidden (e.g. after a model change).
+func (m *Model) refocusIfHidden() {
+	if m.isFieldVisible(m.activeInput) {
+		return
+	}
+	m.inputs[m.activeInput].Blur()
+	start := m.activeInput
+	for {
+		m.activeInput = (m.activeInput + 1) % numFormFields
+		if m.isFieldVisible(m.activeInput) {
+			break
+		}
+		if m.activeInput == start {
+			break // safety exit: all fields hidden
+		}
+	}
+	m.inputs[m.activeInput].Focus()
+	m.justFocused = isReplaceOnFocus(m.activeInput)
+}
+
+// maxCFGScale returns the maximum CFG scale allowed for the given ecosystem.
+func maxCFGScale(eco string) float64 {
+	if eco == "flux1" || eco == "flux2" {
+		return 7.0
+	}
+	return 30.0
+}
+
+// ecosystemForAIR parses an AIR string and returns the ecosystem identifier.
+// Used by both currentEcosystem() and the cfgScale keystroke validator.
+func ecosystemForAIR(air string) string {
+	// Check predefined presets first
 	for _, preset := range modelPresets {
-		if preset.AIR == val {
+		if preset.AIR == air {
 			return preset.Ecosystem
 		}
 	}
-	valLower := strings.ToLower(val)
-	if strings.Contains(valLower, "flux1") {
-		return "flux1"
-	}
+	valLower := strings.ToLower(air)
 	if strings.Contains(valLower, "flux2") || strings.Contains(valLower, "klein") {
 		return "flux2"
+	}
+	if strings.Contains(valLower, "flux") {
+		return "flux1"
 	}
 	if strings.Contains(valLower, "zimage") {
 		return "zimage"
@@ -553,14 +648,6 @@ func (m *Model) currentEcosystem() string {
 		return "sd1"
 	}
 	return "sdxl"
-}
-
-// maxCFGScale returns the maximum CFG scale allowed for the given ecosystem.
-func maxCFGScale(eco string) float64 {
-	if eco == "flux1" || eco == "flux2" {
-		return 7.0
-	}
-	return 30.0
 }
 // Index aligns with the fi* constants.
 var fieldHelpText = []string{
@@ -696,11 +783,7 @@ func NewModel(client *civit.Client) Model {
 			return nil // intermediate state (e.g. bare ".")
 		}
 		// Model-dependent max: 7.0 for Flux, 30.0 for SD/SDXL
-		maxVal := 30.0
-		modelVal := strings.ToLower(inputs[fiModel].Value())
-		if strings.Contains(modelVal, "flux") {
-			maxVal = 7.0
-		}
+		maxVal := maxCFGScale(ecosystemForAIR(inputs[fiModel].Value()))
 		if val > maxVal {
 			return fmt.Errorf("cfg scale max is %.1f", maxVal)
 		}
@@ -1540,6 +1623,8 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			switch m.activeInput {
 			case fiModel:
 				m.inputs[fiModel].SetValue(modelPresets[m.activePreset].AIR)
+				m.adjustFieldsForEcosystem()
+				m.refocusIfHidden()
 			case fiFluxMode:
 				m.inputs[fiFluxMode].SetValue(fluxModePresets[m.activePreset].URN)
 			case fiSampler:
@@ -1606,10 +1691,14 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "tab", "down":
 		// Blur current, focus next visible field.
 		m.inputs[m.activeInput].Blur()
+		startInput := m.activeInput
 		for {
 			m.activeInput = (m.activeInput + 1) % numFormFields
 			if m.isFieldVisible(m.activeInput) {
 				break
+			}
+			if m.activeInput == startInput {
+				break // safety exit: all fields hidden
 			}
 		}
 		m.inputs[m.activeInput].Focus()
@@ -1619,10 +1708,14 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+tab", "up":
 		// Blur current, focus previous visible field.
 		m.inputs[m.activeInput].Blur()
+		startInput := m.activeInput
 		for {
 			m.activeInput = (m.activeInput - 1 + numFormFields) % numFormFields
 			if m.isFieldVisible(m.activeInput) {
 				break
+			}
+			if m.activeInput == startInput {
+				break // safety exit
 			}
 		}
 		m.inputs[m.activeInput].Focus()

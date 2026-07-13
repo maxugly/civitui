@@ -140,11 +140,20 @@ Following Grok's audit: [specs/api_parameters_audit.md](specs/api_parameters_aud
   - Handle key navigation and preset selection in `handleConfigKey()`.
   - In `toRequest()`, parse value into `FluxUltraRaw` boolean pointer.
 - [ ] **Add Unit Tests and Verify Quality Gates**
-  - Run quality gates: `go build ./...`, `go vet ./...`, `go test ./... -count=1`.
-
-### Bugfix
+  - Run quality gates: `go build ./...`, `go vet ./...`, `go test ./... -count=1`.### Bugfix
 
 - [x] **BUGFIX: model → baseModel JSON key** — `pkg/civit/civit.go` line 52 sends `json:"model"` but schema expects `json:"baseModel"`. Fixed in commit.
+
+## Active Tasks — Dynamic Visibility Blockers
+
+- [ ] **Fix Custom AIR Substring Matching**
+  - Update `currentEcosystem()` in `internal/ui/ui.go` to match `"flux"` (without `"flux2"`) as `"flux1"` to prevent custom Flux 1 models from falling back to `"sdxl"`.
+- [ ] **Implement Active Sampler/Scheduler Adjustment**
+  - Add `adjustFieldsForEcosystem()` in `internal/ui/ui.go` to check and auto-reset `fiSampler` and `fiScheduler` to valid options if they become invalid after switching base models.
+  - Reset `fiFluxMode` and `fiFluxUltraRaw` when switching away from a `"flux1"` model.
+- [ ] **Fix Navigation Loops and Stuck Focus**
+  - Add an iteration limit/exit condition to Tab/Shift+Tab loops in `handleConfigKey()` in `internal/ui/ui.go` to prevent infinite loops if all fields are hidden.
+  - Add a refocus handler to automatically shift focus to the next visible field if the currently active input is hidden by a model switch.
 
 ## Completed Tasks
 
