@@ -461,8 +461,8 @@ func (m *Model) isFieldVisible(idx int) bool {
 	case fiDenoise:
 		return false // hidden until img2img source image support is added
 	case fiClipSkip:
-		model := m.inputs[fiModel].Value()
-		return !strings.Contains(model, "flux") && !strings.Contains(model, "zImage")
+		model := strings.ToLower(m.inputs[fiModel].Value())
+		return !strings.Contains(model, "flux") && !strings.Contains(model, "zimage")
 	case fiFluxUltraRaw:
 		return m.inputs[fiFluxMode].Value() == "urn:air:flux1:checkpoint:civitai:618692@1088507"
 	default:
@@ -685,8 +685,8 @@ func NewModel(client *civit.Client) Model {
 		if err != nil {
 			return nil
 		}
-		if val < 320 || val > 3840 {
-			return fmt.Errorf("upscale width must be 320-3840")
+		if val > 3840 {
+			return fmt.Errorf("upscale width max is 3840")
 		}
 		return nil
 	}
@@ -701,8 +701,8 @@ func NewModel(client *civit.Client) Model {
 		if err != nil {
 			return nil
 		}
-		if val < 320 || val > 3840 {
-			return fmt.Errorf("upscale height must be 320-3840")
+		if val > 3840 {
+			return fmt.Errorf("upscale height max is 3840")
 		}
 		return nil
 	}
@@ -749,13 +749,13 @@ func (m *Model) toRequest() civit.GenerationRequest {
 		OutputFormat:   m.inputs[fiOutputFormat].Value(),
 		Seed:           seed,
 		Draft:          m.inputs[fiDraft].Value() == "true",
-		// Tier 2
-		Denoise:       parseFloatPtr(m.inputs[fiDenoise].Value()),
-		ClipSkip:      parseIntPtr(m.inputs[fiClipSkip].Value()),
+		// Tier 2 — only set conditional fields when visible/active
+		Denoise:       nilIf(!m.isFieldVisible(fiDenoise), parseFloatPtr(m.inputs[fiDenoise].Value())),
+		ClipSkip:      nilIf(!m.isFieldVisible(fiClipSkip), parseIntPtr(m.inputs[fiClipSkip].Value())),
 		UpscaleWidth:  parseIntPtr(m.inputs[fiUpscaleWidth].Value()),
 		UpscaleHeight: parseIntPtr(m.inputs[fiUpscaleHeight].Value()),
 		Experimental:  parseBoolPtr(m.inputs[fiExperimental].Value()),
-		FluxUltraRaw:  parseBoolPtr(m.inputs[fiFluxUltraRaw].Value()),
+		FluxUltraRaw:  nilIf(!m.isFieldVisible(fiFluxUltraRaw), parseBoolPtr(m.inputs[fiFluxUltraRaw].Value())),
 	}
 }
 
@@ -790,6 +790,15 @@ func parseBoolPtr(s string) *bool {
 	}
 	v := s == "true"
 	return &v
+}
+
+// nilIf returns nil if cond is true, otherwise returns val. Used to
+// suppress conditional tier-2 fields when the model/mode doesn't apply.
+func nilIf[T any](cond bool, val *T) *T {
+	if cond {
+		return nil
+	}
+	return val
 }
 
 // refocusConfig snaps the phase back to config and re-focuses the active input.
@@ -1114,6 +1123,10 @@ func (m *Model) viewConfig(b *strings.Builder) {
 	var leftLines []string
 
 	for i, input := range m.inputs {
+		// Skip conditionally hidden fields.
+		if !m.isFieldVisible(i) {
+			continue
+		}
 		// Label.
 		label := fieldLabelStyle.Render(fmt.Sprintf("  %-16s", fieldLabels[i]+":"))
 		line := label
@@ -1470,20 +1483,27 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch key {
 	case "tab", "down":
-		// Blur current, focus next. On numeric fields, arm the
-		// type-to-replace trigger so the first keystroke clears
-		// the old value instead of appending.
+		// Blur current, focus next visible field.
 		m.inputs[m.activeInput].Blur()
-		m.activeInput = (m.activeInput + 1) % numFormFields
+		for {
+			m.activeInput = (m.activeInput + 1) % numFormFields
+			if m.isFieldVisible(m.activeInput) {
+				break
+			}
+		}
 		m.inputs[m.activeInput].Focus()
 		m.justFocused = isReplaceOnFocus(m.activeInput)
 		return m, nil
 
 	case "shift+tab", "up":
-		// Blur current, focus previous. Same type-to-replace for
-		// numeric fields.
+		// Blur current, focus previous visible field.
 		m.inputs[m.activeInput].Blur()
-		m.activeInput = (m.activeInput - 1 + numFormFields) % numFormFields
+		for {
+			m.activeInput = (m.activeInput - 1 + numFormFields) % numFormFields
+			if m.isFieldVisible(m.activeInput) {
+				break
+			}
+		}
 		m.inputs[m.activeInput].Focus()
 		m.justFocused = isReplaceOnFocus(m.activeInput)
 		return m, nil
