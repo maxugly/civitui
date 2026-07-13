@@ -207,6 +207,7 @@ type ModelPreset struct {
 	Name        string
 	Description string
 	AIR         string
+	Ecosystem   string // "flux1", "flux2", "sdxl", "sd1", "zimage"
 }
 
 var modelPresets = []ModelPreset{
@@ -214,59 +215,111 @@ var modelPresets = []ModelPreset{
 		Name:        "Flux.1 Dev (Standard)",
 		Description: "Recommended. Balanced and high quality for general prompts.",
 		AIR:         "air:flux1:checkpoint:civitai:618692@691639",
+		Ecosystem:   "flux1",
 	},
 	{
 		Name:        "Pony Diffusion V6 XL",
 		Description: "Extremely popular SDXL checkpoint for expressive art.",
 		AIR:         "air:pony-diffusion-v6:checkpoint:civitai:257204@290640",
+		Ecosystem:   "sdxl",
 	},
 	{
 		Name:        "SDXL 1.0 (Base)",
 		Description: "Stability AI official base model. Fast and reliable.",
 		AIR:         "air:sdxl:checkpoint:civitai:101055@128078",
+		Ecosystem:   "sdxl",
 	},
 	{
 		Name:        "Stable Diffusion 1.5",
 		Description: "Classic model. Extremely fast and lightweight.",
 		AIR:         "air:sd15:checkpoint:civitai:1102@11124",
+		Ecosystem:   "sd1",
 	},
 }
 
 // ── Sampler Presets ──────────────────────────────────────────────────────────
 
 // SamplerPreset describes a selectable diffusion sampler from the right pane.
+// ValSD, ValZImage, ValFlux2 hold the ecosystem-specific API values.
 type SamplerPreset struct {
 	Name        string
 	Description string
-	Sampler     string
+	ValSD       string // Value for SD1/SDXL/Pony/Illustrious
+	ValZImage   string // Value for ZImage
+	ValFlux2    string // Value for Flux2Klein
 }
 
 var samplerPresets = []SamplerPreset{
 	{
 		Name:        "Euler a",
 		Description: "Euler Ancestral. Fast, creative, slightly unstable at high steps.",
-		Sampler:     "Euler a",
+		ValSD:       "Euler a",
 	},
 	{
 		Name:        "DPM++ 2M Karras",
 		Description: "Recommended for SDXL. High quality, excellent convergence.",
-		Sampler:     "DPM++ 2M Karras",
+		ValSD:       "DPM++ 2M Karras",
 	},
 	{
 		Name:        "DPM++ SDE Karras",
 		Description: "Highly realistic, great detail, but takes twice as long.",
-		Sampler:     "DPM++ SDE Karras",
+		ValSD:       "DPM++ SDE Karras",
 	},
 	{
 		Name:        "Euler",
 		Description: "Classic simple ODE solver. Fast and consistent.",
-		Sampler:     "Euler",
+		ValSD:       "Euler",
+		ValZImage:   "euler",
+		ValFlux2:    "euler",
 	},
 	{
 		Name:        "Heun",
 		Description: "Very high accuracy, but requires more compute per step.",
-		Sampler:     "Heun",
+		ValSD:       "Heun",
+		ValZImage:   "heun",
+		ValFlux2:    "heun",
 	},
+	{
+		Name:        "DPM++ 2M",
+		Description: "DPM++ 2M. Good convergence.",
+		ValSD:       "DPM++ 2M",
+		ValFlux2:    "dpm++2m",
+	},
+	{
+		Name:        "LCM",
+		Description: "Latent Consistency Model. Fast generation with few steps.",
+		ValSD:       "LCM",
+		ValFlux2:    "lcm",
+	},
+}
+
+// filteredSamplerPresets returns the sampler presets valid for the current model ecosystem.
+func (m *Model) filteredSamplerPresets() []SamplerPreset {
+	eco := m.currentEcosystem()
+	var visible []SamplerPreset
+	for _, p := range samplerPresets {
+		switch eco {
+		case "flux1":
+			// Flux1 uses fluxMode instead; sampler is hidden
+		case "flux2":
+			if p.ValFlux2 != "" {
+				visible = append(visible, p)
+			}
+		case "zimage":
+			if p.ValZImage != "" {
+				visible = append(visible, p)
+			}
+		case "sd1", "sdxl":
+			if p.ValSD != "" {
+				visible = append(visible, p)
+			}
+		default:
+			if p.ValSD != "" {
+				visible = append(visible, p)
+			}
+		}
+	}
+	return visible
 }
 
 // ── Aspect Ratio Presets ─────────────────────────────────────────────────────
@@ -461,16 +514,54 @@ func (m *Model) isFieldVisible(idx int) bool {
 	case fiDenoise:
 		return false // hidden until img2img source image support is added
 	case fiClipSkip:
-		model := strings.ToLower(m.inputs[fiModel].Value())
-		return !strings.Contains(model, "flux") && !strings.Contains(model, "zimage")
+		eco := m.currentEcosystem()
+		return eco != "flux1" && eco != "flux2" && eco != "zimage"
 	case fiFluxUltraRaw:
 		return m.inputs[fiFluxMode].Value() == "urn:air:flux1:checkpoint:civitai:618692@1088507"
+	case fiFluxMode:
+		return m.currentEcosystem() == "flux1"
+	case fiSampler:
+		return len(m.filteredSamplerPresets()) > 1
 	default:
 		return true
 	}
 }
 
-// fieldHelpText provides the right-pane help for each non-Model field.
+// currentEcosystem returns the ecosystem of the currently selected model.
+// Keys off the modelPreset's Ecosystem if matched, or parses the AIR string.
+func (m *Model) currentEcosystem() string {
+	val := m.inputs[fiModel].Value()
+	for _, preset := range modelPresets {
+		if preset.AIR == val {
+			return preset.Ecosystem
+		}
+	}
+	valLower := strings.ToLower(val)
+	if strings.Contains(valLower, "flux1") {
+		return "flux1"
+	}
+	if strings.Contains(valLower, "flux2") || strings.Contains(valLower, "klein") {
+		return "flux2"
+	}
+	if strings.Contains(valLower, "zimage") {
+		return "zimage"
+	}
+	if strings.Contains(valLower, "sdxl") || strings.Contains(valLower, "pony") || strings.Contains(valLower, "illustrious") {
+		return "sdxl"
+	}
+	if strings.Contains(valLower, "sd15") || strings.Contains(valLower, "sd1") {
+		return "sd1"
+	}
+	return "sdxl"
+}
+
+// maxCFGScale returns the maximum CFG scale allowed for the given ecosystem.
+func maxCFGScale(eco string) float64 {
+	if eco == "flux1" || eco == "flux2" {
+		return 7.0
+	}
+	return 30.0
+}
 // Index aligns with the fi* constants.
 var fieldHelpText = []string{
 	/* fiPrompt */ "Describe the image you want to generate. Be specific and descriptive. E.g. 'a photo of an astronaut on Mars'. (Required)",
@@ -483,7 +574,7 @@ var fieldHelpText = []string{
 	/* fiWidth */ "Width of the generated image in pixels. Range: 64–4096. Standard resolutions: 1024, 2048. Only digits allowed.",
 	/* fiHeight */ "Height of the generated image in pixels. Range: 64–4096. Standard resolutions: 1024, 2048. Only digits allowed.",
 	/* fiSteps */ "Number of denoising steps. Range: 1–100. Recommended: 20-30. More steps take longer but add detail.",
-	/* fiCFGScale */ "Classifier Free Guidance scale. Range: 1.0–7.0. Higher values follow the prompt more strictly. Decimals allowed.",
+	/* fiCFGScale */ "Classifier Free Guidance scale. Range: 1.0–7.0 (Flux) / 1.0–30.0 (SD/SDXL). Higher values follow the prompt more strictly. Decimals allowed.",
 	/* fiQuantity */ "Number of images to generate. Range: 1–20 (API limit). Each image is processed concurrently in the workflow.",
 	/* fiOutputFormat */ "Output image format. JPEG is smaller; PNG is lossless. Use Right Arrow to select.",
 	/* fiSeed */ "Random seed for generation consistency. Range: 1–4294967295. Leave empty for a random seed.",
@@ -604,8 +695,14 @@ func NewModel(client *civit.Client) Model {
 		if err != nil {
 			return nil // intermediate state (e.g. bare ".")
 		}
-		if val > 7.0 {
-			return fmt.Errorf("cfg scale max is 7.0")
+		// Model-dependent max: 7.0 for Flux, 30.0 for SD/SDXL
+		maxVal := 30.0
+		modelVal := strings.ToLower(inputs[fiModel].Value())
+		if strings.Contains(modelVal, "flux") {
+			maxVal = 7.0
+		}
+		if val > maxVal {
+			return fmt.Errorf("cfg scale max is %.1f", maxVal)
 		}
 		return nil
 	}
@@ -737,8 +834,18 @@ func (m *Model) toRequest() civit.GenerationRequest {
 		Prompt:         m.inputs[fiPrompt].Value(),
 		NegativePrompt: m.inputs[fiNegativePrompt].Value(),
 		Model:          m.inputs[fiModel].Value(),
-		FluxMode:       m.inputs[fiFluxMode].Value(),
-		Sampler:        m.inputs[fiSampler].Value(),
+		FluxMode: func() string {
+			if !m.isFieldVisible(fiFluxMode) {
+				return ""
+			}
+			return m.inputs[fiFluxMode].Value()
+		}(),
+		Sampler: func() string {
+			if !m.isFieldVisible(fiSampler) {
+				return ""
+			}
+			return m.inputs[fiSampler].Value()
+		}(),
 		Scheduler:      m.inputs[fiScheduler].Value(),
 		AspectRatio:    m.inputs[fiAspectRatio].Value(),
 		Width:          width,
@@ -846,8 +953,9 @@ func (m *Model) validateNumericFields() error {
 		if err != nil {
 			return fmt.Errorf("cfg scale: invalid float %q", v)
 		}
-		if val < 1.0 || val > 7.0 {
-			return fmt.Errorf("cfg scale must be between 1.0 and 7.0")
+		maxVal := maxCFGScale(m.currentEcosystem())
+		if val < 1.0 || val > maxVal {
+			return fmt.Errorf("cfg scale must be between 1.0 and %.1f", maxVal)
 		}
 	}
 	if v := m.inputs[fiQuantity].Value(); v != "" {
@@ -1175,7 +1283,7 @@ func (m *Model) viewConfig(b *strings.Builder) {
 			}
 		case fiSampler:
 			rightLines = append(rightLines, dimStyle.Render("── Sampler Presets ──"))
-			for _, preset := range samplerPresets {
+			for _, preset := range m.filteredSamplerPresets() {
 				presetsList = append(presetsList, struct {
 					Name        string
 					Description string
@@ -1404,7 +1512,7 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case fiFluxMode:
 			presetsLen = len(fluxModePresets)
 		case fiSampler:
-			presetsLen = len(samplerPresets)
+			presetsLen = len(m.filteredSamplerPresets())
 		case fiScheduler:
 			presetsLen = len(m.filteredSchedulerPresets())
 		case fiAspectRatio:
@@ -1435,7 +1543,20 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case fiFluxMode:
 				m.inputs[fiFluxMode].SetValue(fluxModePresets[m.activePreset].URN)
 			case fiSampler:
-				m.inputs[fiSampler].SetValue(samplerPresets[m.activePreset].Sampler)
+				visible := m.filteredSamplerPresets()
+				if m.activePreset < len(visible) {
+					eco := m.currentEcosystem()
+					var val string
+					switch eco {
+					case "flux2":
+						val = visible[m.activePreset].ValFlux2
+					case "zimage":
+						val = visible[m.activePreset].ValZImage
+					default:
+						val = visible[m.activePreset].ValSD
+					}
+					m.inputs[fiSampler].SetValue(val)
+				}
 			case fiScheduler:
 				visible := m.filteredSchedulerPresets()
 				if m.activePreset < len(visible) {
