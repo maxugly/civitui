@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>civitui — lazygit layout sketch</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", "SF Mono", "Menlo", monospace;
+    background: #0d1117;
+    color: #c9d1d9;
+    padding: 20px;
+    line-height: 1.4;
+    font-size: 13px;
+  }
+  .frame {
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    overflow: hidden;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  .header {
+    background: #161b22;
+    padding: 4px 12px;
+    border-bottom: 1px solid #30363d;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .header .brand { background: #1f6feb; color: #fff; padding: 1px 8px; border-radius: 3px; font-weight: bold; font-size: 12px; }
+  .header .phase { background: #30363d; color: #c9d1d9; padding: 1px 8px; border-radius: 3px; font-size: 11px; }
+  .section-title {
+    padding: 4px 12px;
+    font-size: 11px;
+    color: #8b949e;
+    border-bottom: 1px solid #21262d;
+    background: #0d1117;
+  }
+  .section-title span { color: #58a6ff; }
+  .config { padding: 8px 12px; }
+  .field { display: flex; align-items: baseline; gap: 4px; margin-bottom: 2px; }
+  .field.active .label { color: #d2a8ff; }
+  .field.active .label::before { content: "▶ "; color: #d2a8ff; }
+  .field .label { color: #8b949e; min-width: 150px; font-size: 12px; }
+  .field .value {
+    background: #161b22; border: 1px solid #30363d; border-radius: 3px;
+    padding: 1px 6px; color: #c9d1d9; flex: 1; font-size: 12px;
+    font-family: inherit;
+  }
+  .field .value.prompt { border-color: #d2a8ff; min-height: 20px; }
+  .field .value.wide { min-width: 400px; }
+  .field .value.short { max-width: 100px; }
+  .field .value.tiny { max-width: 60px; }
+  .help-pane {
+    position: absolute; right: 16px; top: 100px;
+    width: 180px; color: #58a6ff; font-size: 11px;
+    border-left: 1px solid #21262d; padding-left: 8px;
+  }
+  .queue { padding: 0; }
+  .queue .job {
+    padding: 3px 12px;
+    border-bottom: 1px solid #21262d;
+    display: flex; gap: 8px; align-items: center;
+    font-size: 12px;
+  }
+  .job .status { min-width: 16px; }
+  .job .status.spin { color: #d2991d; }
+  .job .status.done { color: #3fb950; }
+  .job .status.fail { color: #f85149; }
+  .job .prompt { color: #c9d1d9; flex: 1; }
+  .job .prompt::before { content: "\""; color: #484f58; }
+  .job .prompt::after { content: "\""; color: #484f58; }
+  .job .cost { color: #d2991d; font-size: 11px; }
+  .job .action { color: #f0f6fc; }
+  .job .confirm { color: #d2991d; }
+  .debug { padding: 4px 12px; font-size: 11px; color: #484f58; }
+  .footer {
+    padding: 4px 12px;
+    border-top: 1px solid #21262d;
+    color: #484f58;
+    font-size: 11px;
+  }
+  .rel { position: relative; }
+  .divider { border-bottom: 1px solid #21262d; }
+</style>
+</head>
+<body>
+
+<div class="frame">
+  <!-- Header -->
+  <div class="header">
+    <span class="brand">civitui</span>
+    <span class="phase">[CONFIG]</span>
+  </div>
+
+  <!-- Config form -->
+  <div class="section-title"><span>▼</span> Configure generation</div>
+  <div class="config rel">
+    <div class="field active">
+      <span class="label">Prompt:</span>
+      <span class="value prompt wide">car driving through neon city at night</span>
+    </div>
+    <div class="field">
+      <span class="label">Negative Prompt:</span>
+      <span class="value wide">optional — what to avoid</span>
+    </div>
+    <div class="field">
+      <span class="label">Model:</span>
+      <span class="value">air:flux1:checkpoint:civitai:618692@691639</span>
+    </div>
+    <div class="field">
+      <span class="label">Flux Mode:</span>
+      <span class="value">urn:air:flux1:checkpoint:civitai:618692@691639</span>
+    </div>
+    <div class="field">
+      <span class="label">Scheduler:</span>
+      <span class="value short">EulerA</span>
+    </div>
+    <div class="field">
+      <span class="label">Aspect Ratio:</span>
+      <span class="value short">1:1</span>
+    </div>
+    <div class="field">
+      <span class="label">Width:</span>
+      <span class="value tiny">1024</span>
+      <span class="label" style="min-width:auto; margin-left:20px;">Height:</span>
+      <span class="value tiny">1024</span>
+      <span class="label" style="min-width:auto; margin-left:20px;">Steps:</span>
+      <span class="value tiny">20</span>
+    </div>
+    <div class="field">
+      <span class="label">CFG Scale:</span>
+      <span class="value tiny">7.0</span>
+      <span class="label" style="min-width:auto; margin-left:20px;">Quantity:</span>
+      <span class="value tiny">4</span>
+      <span class="label" style="min-width:auto; margin-left:20px;">Seed:</span>
+      <span class="value tiny">random</span>
+    </div>
+    <div class="field">
+      <span class="label">Output Format:</span>
+      <span class="value short">jpeg</span>
+      <span class="label" style="min-width:auto; margin-left:20px;">Draft Mode:</span>
+      <span class="value short">false</span>
+    </div>
+
+    <div class="help-pane">
+      ── Help ──<br>
+      Describe the image you want<br>
+      to generate. Be specific and<br>
+      descriptive.<br><br>
+      E.g. 'a photo of an astronaut<br>
+      on Mars'. (Required)
+    </div>
+  </div>
+
+  <!-- Queue -->
+  <div class="section-title"><span>▼</span> Queue</div>
+  <div class="queue">
+    <div class="job">
+      <span class="status spin">⣾</span>
+      <span class="prompt">car driving through neon city</span>
+      <span class="cost">30ⓑ</span>
+      <span class="confirm">generate? [y/n]</span>
+    </div>
+    <div class="job">
+      <span class="status done">✓</span>
+      <span class="prompt">a majestic cat wearing a top hat</span>
+      <span class="cost">42ⓑ</span>
+      <span class="action">civitai_output_wf_a1b2c3d4_1.png</span>
+    </div>
+    <div class="job">
+      <span class="status fail">✗</span>
+      <span class="prompt">bad prompt</span>
+      <span class="cost">-</span>
+      <span class="action" style="color:#f85149;">API error 400: validation</span>
+    </div>
+  </div>
+
+  <!-- Debug -->
+  <div class="section-title"><span>▼</span> Debug</div>
+  <div class="debug">
+    15:30:01 debug mode enabled<br>
+    15:30:05 job 0 created: "car driving through neon city"<br>
+    15:30:06 job 0 priced: 30 buzz, awaiting confirmation<br>
+    15:30:08 POST /v2/consumer/workflows?whatif=true → 200 (30 buzz)
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    ctrl+c quit  •  tab/↑↓ navigate  •  enter generate
+  </div>
+</div>
+
+</body>
+</html>

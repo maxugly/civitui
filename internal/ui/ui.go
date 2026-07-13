@@ -1417,16 +1417,18 @@ func (m Model) View() string {
 	return m.frame(raw)
 }
 
-// frame wraps text in a bordered box that spans the full terminal width.
-// Each line gets │ ... │ on the sides, with a top ┌──┐ and bottom └──┘.
+// frame wraps text in a plain box-drawing-character border (lazygit style).
+// No ANSI styling on the border characters — this avoids the alignment
+// bugs that happen when styled borders interact with styled content.
+// Each line of text gets a plain │ prefix and suffix with space padding.
 func (m Model) frame(text string) string {
-	width := max(m.termWidth, 40) - 2 // account for side borders
+	width := max(m.termWidth, 40) - 2
 	var out strings.Builder
 
 	// Top border.
-	out.WriteString(dimStyle.Render("┌"))
-	out.WriteString(dimStyle.Render(strings.Repeat("─", max(0, width))))
-	out.WriteString(dimStyle.Render("┐"))
+	out.WriteString("┌")
+	out.WriteString(strings.Repeat("─", max(0, width)))
+	out.WriteString("┐")
 	out.WriteString("\n")
 
 	lines := strings.Split(text, "\n")
@@ -1436,17 +1438,17 @@ func (m Model) frame(text string) string {
 		if pad < 0 {
 			pad = 0
 		}
-		out.WriteString(dimStyle.Render("│"))
+		out.WriteString("│")
 		out.WriteString(line)
 		out.WriteString(strings.Repeat(" ", pad))
-		out.WriteString(dimStyle.Render("│"))
+		out.WriteString("│")
 		out.WriteString("\n")
 	}
 
 	// Bottom border.
-	out.WriteString(dimStyle.Render("└"))
-	out.WriteString(dimStyle.Render(strings.Repeat("─", max(0, width))))
-	out.WriteString(dimStyle.Render("┘"))
+	out.WriteString("└")
+	out.WriteString(strings.Repeat("─", max(0, width)))
+	out.WriteString("┘")
 
 	return out.String()
 }
