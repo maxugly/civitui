@@ -30,6 +30,7 @@ type JobStatus int
 
 const (
 	JobPricing     JobStatus = iota // waiting for CalculatePrice
+	JobConfirming                   // showing cost, awaiting y/n
 	JobSubmitting                   // waiting for SubmitJob
 	JobPolling                      // polling for completion
 	JobDownloading                  // downloading images
@@ -42,6 +43,8 @@ func (s JobStatus) String() string {
 	switch s {
 	case JobPricing:
 		return "pricing..."
+	case JobConfirming:
+		return ""
 	case JobSubmitting:
 		return "submitting..."
 	case JobPolling:
@@ -1206,8 +1209,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			job.ErrMsg = msg.err.Error()
 		} else {
 			job.Cost = msg.cost
-			job.Status = JobSubmitting
-			return m, submitCmd(m.client, msg.jobID, job.req)
+			job.Status = JobConfirming
 		}
 
 	case submitResultMsg:
@@ -1377,6 +1379,10 @@ func (m *Model) viewQueue(b *strings.Builder) {
 
 		// Status text.
 		switch job.Status {
+		case JobConfirming:
+			b.WriteString(costStyle.Render(fmt.Sprintf("%dⓑ ", job.Cost)))
+			b.WriteString(keyStyle.Render("generate? "))
+			b.WriteString(keyStyle.Render("[y/n]"))
 		case JobDone:
 			if len(job.dlPaths) > 0 {
 				b.WriteString(successStyle.Render(job.dlPaths[0]))
@@ -1592,6 +1598,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, tea.Quit
+	}
+
+	// Intercept y/n when a job is awaiting confirmation.
+	if key == "y" || key == "Y" || key == "n" || key == "N" {
+		for _, job := range m.jobs {
+			if job.Status == JobConfirming {
+				if key == "y" || key == "Y" {
+					job.Status = JobSubmitting
+					return m, submitCmd(m.client, job.ID, job.req)
+				}
+				job.Status = JobFailed
+				job.ErrMsg = "cancelled"
+				return m, nil
+			}
+		}
 	}
 
 	// All config navigation — tab, shift+tab, up, down, enter, presets.
