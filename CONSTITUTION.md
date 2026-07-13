@@ -51,17 +51,20 @@ This rule exists for instant copy-paste usability. Implementation agents must no
 
 | role | agent | responsibility |
 |---|---|---|
-| **Architect** | Bones (via Antigravity) | Drafts architectural plans, task breakdowns, and specifications into local markdown files (`TODO.md`, `specs/`, `PLAN.md`). Reviews completed work against spec. |
-| **Implementer** | Tom/Hermes | Reads architect-written plans, executes code modifications, writes tests, updates status markers in plan files upon completion. Reports blockers honestly. |
+| **Architect** | Bones (via Antigravity) | Drafts architectural plans, task breakdowns, and specifications into local markdown files (`TODO.md`, `specs/`). Performs final sign-off. |
+| **Implementer** | Tom/Hermes | Reads architect-written plans, executes code modifications, writes tests, and marks task status as pending review. |
+| **QA / Reviewer** | Grok (via Grok CLI) | Runs quality gates (`go build`, `go vet`, `go test`), inspects code for rule compliance, and either approves or requests changes. |
 | **Operator** | Max | Human oversight. Final authority on design decisions, acceptance criteria, and deployment. |
 
 ### Workflow Cycle
 
 ```
-Architect writes PLAN.md / TODO.md
-    → Implementer reads, executes, marks complete
-        → Architect reviews, updates spec
-            → repeat
+User (Max) triggers Architect (Bones)
+    → Bones drafts plan in TODO.md / specs/
+        → Implementer (Hermes) executes code changes
+            → QA/Reviewer (Grok) runs tests & verifies compliance
+                → If Fail: Hermex fixes code (loop back)
+                → If Pass: Architect (Bones) does final checkoff
 ```
 
 ### Status Markers
@@ -71,6 +74,7 @@ Implementation agents append status to task files upon completion:
 ```markdown
 - [x] Task description — completed in commit `abc1234`
 ```
+
 
 Never delete a task file without explicit instruction. Mark it done, don't erase it.
 

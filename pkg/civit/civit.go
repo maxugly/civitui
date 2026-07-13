@@ -47,15 +47,20 @@ func NewClient(apiKey string) *Client {
 
 // GenerationRequest holds the parameters for a text-to-image generation.
 type GenerationRequest struct {
-	Prompt        string `json:"prompt"`
-	NegativePrompt string `json:"negativePrompt,omitempty"`
-	Model         string `json:"model"`          // AIR format, e.g. "air:flux1:checkpoint:civitai:618692@691639"
-	Width         int    `json:"width"`
-	Height        int    `json:"height"`
-	Steps         int    `json:"steps"`
-	CFGScale      float64 `json:"cfgScale"`
-	Quantity      int    `json:"quantity"`
-	Seed          *int64 `json:"seed,omitempty"` // nil means random
+	Prompt         string  `json:"prompt"`
+	NegativePrompt string  `json:"negativePrompt,omitempty"`
+	Model          string  `json:"model"`
+	FluxMode       string  `json:"fluxMode,omitempty"`       // Flux variant: empty (off) or a full AIR URN
+	Sampler        string  `json:"sampler,omitempty"`
+	Scheduler      string  `json:"scheduler,omitempty"`      // noise schedule: simple, discrete, karras, exponential, ays
+	AspectRatio    string  `json:"aspectRatio,omitempty"`
+	Width          int     `json:"width"`
+	Height         int     `json:"height"`
+	Steps          int     `json:"steps"`
+	CFGScale       float64 `json:"cfgScale"`
+	Quantity       int     `json:"quantity"`
+	OutputFormat   string  `json:"outputFormat,omitempty"`   // "jpeg" or "png"
+	Seed           *int64  `json:"seed,omitempty"` // nil means random
 }
 
 // workflowStep is the internal JSON shape for a single step in the workflow.

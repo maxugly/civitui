@@ -1,22 +1,31 @@
-- [x] Create CONSTITUTION.md — completed in commit pending. File at `CONSTITUTION.md`.
+# Project Todo List
 
-The following task was completed:
+## Active Tasks — API Parameter Expansion
 
-Hermes, please create a new file named `CONSTITUTION.md` in the root of the project directory. This file will serve as the project's development guidelines and rules of engagement.
+Following Grok's audit: [specs/api_parameters_audit.md](specs/api_parameters_audit.md)
 
-## Requirements for CONSTITUTION.md:
+### Tier 1 — High Value, Easy Wins
 
-### 1. Immutable Engineering Laws
-- **Strict Separation of Concerns**: 
-  - `pkg/civit/` must remain a completely headless Core Engine. It manages the 5-step API transaction chain (`CalculatePrice`, `SubmitJob`, `PollJobStatus`, `DownloadImage`). It must never import or contain UI, terminal, or Bubble Tea (`tea`) logic.
-  - `internal/ui/` handles all user interface elements (Bubble Tea main loop, `huh` input forms, progressive viewport canvas rendering).
-- **Code Block Rule**:
-  - Any code block in documentation, tasks, or prompts containing terminal commands must only contain the executable command. No comments (e.g., no lines starting with `#`), no annotations inside the block. Limit to one command per block for instant copy-paste usability.
-- **Environment Policy**:
-  - Keep dependencies minimal, high-performance, and independent of heavy system frameworks or systemd.
+- [ ] **aspectRatio** — model-aware dropdown that auto-fills width/height. Presets per model: 1:1, 3:2, 2:3, 16:9, 9:16, 4:3, 3:4. Flux Ultra adds 21:9, 9:21.
+- [ ] **fluxMode** — dropdown for Flux model variants: Draft / Standard / Krea / Pro 1.1 / Ultra. Only visible when base model is Flux1. Maps labels to AIR URNs internally.
+- [ ] **outputFormat** — PNG vs JPEG toggle. Simple dropdown. Default JPEG.
+- [ ] **scheduler** — dropdown: simple, discrete, karras, exponential, ays. Hide in advanced section. Model-aware: ZImage only simple/discrete, Flux2Klein all except ays.
+- [ ] **draft** — toggle for fast preview mode. Injects draft LoRAs, drops steps to 6–8. "Speed over quality."
 
-### 2. File-Driven Workflow
-- Architectural designs and tasks are drafted into local markdown files (e.g., `TODO.md`, `agent.md`) by the Architect Copilot (Antigravity).
-- Implementation agents (Hermes) read these files, execute the requested code modifications/creations, and update status in the relevant file once complete.
+### Tier 2 — Worth Adding, Medium Effort
 
-Please write the complete `CONSTITUTION.md` now and delete this `TODO.md` (or mark it complete) when finished.
+- [ ] **denoise** — float input 0.0–1.0 (step 0.05). For img2img. Only show when source image is attached.
+- [ ] **clipSkip** — int input 1–3. SD/SDXL only. Default 2. Hide for Flux/ZImage.
+- [ ] **upscaleWidth + upscaleHeight** — paired int inputs 320–3840. For upscaling workflows.
+- [ ] **experimental** — toggle for SDCPP edge features. Advanced section.
+- [ ] **fluxUltraRaw** — toggle. Only visible when fluxMode is Ultra.
+
+### Bugfix
+
+- [ ] **BUGFIX: model → baseModel JSON key** — `pkg/civit/civit.go` line 52 sends `json:"model"` but schema expects `json:"baseModel"`.
+
+## Completed Tasks
+
+- [x] **Add Sampler Parameter and Range Validation** — *Completed by Tom on 2026-07-12*
+  - All subtasks complete. Additionally: input masking on CFG Scale (keystroke-level max-7.0 enforcement), resolution raised to 4K (4096), quantity default 4.
+  - **API-aligned pass (Grok research):** Steps capped at 100 (API Zod schema: max(100)), quantity capped at 20 (API: max(20)), seed bounded 1–4294967295 (API: uint32 max). CFG kept at 7.0 per operator directive despite API allowing 30.
