@@ -1369,76 +1369,96 @@ func fileDebugLogPath() string {
 }
 
 // View renders the config form at the top and the job queue below,
-// wrapped in a clean frame — like lazygit. Content is rendered raw,
-// then the outer border and section dividers are applied.
+// each in its own bordered panel inside a rounded outer frame.
 func (m Model) View() string {
-	var b strings.Builder
+	var sections []string
 
-	// ── Header bar ──
-	b.WriteString(headerStyle.Render(" civitui "))
-	b.WriteString("  ")
-	b.WriteString(phaseStyle.Render(" [CONFIG] "))
-	b.WriteString("\n\n")
+	// ── Header ──
+	sections = append(sections, headerStyle.Render(" civitui ")+"  "+phaseStyle.Render(" [CONFIG] "))
 
-	// ── Config form ──
-	b.WriteString(m.sectionDivider("Configure generation"))
-	b.WriteString("\n")
-	m.viewConfig(&b)
+	// ── Config panel ──
+	var cfgBuf strings.Builder
+	m.viewConfig(&cfgBuf)
+	sections = append(sections, m.innerPanel("Configure generation", cfgBuf.String()))
 
-	// ── Queue ──
+	// ── Queue panel ──
 	if len(m.jobs) > 0 {
-		b.WriteString("\n")
-		b.WriteString(m.sectionDivider("Queue"))
-		b.WriteString("\n")
-		m.viewQueue(&b)
+		var qBuf strings.Builder
+		m.viewQueue(&qBuf)
+		sections = append(sections, m.innerPanel("Queue", qBuf.String()))
 	}
 
-	// ── Debug ──
+	// ── Debug panel ──
 	if m.debug && len(m.debugLog) > 0 {
-		b.WriteString("\n")
-		b.WriteString(m.sectionDivider("Debug"))
-		b.WriteString("\n")
+		var dBuf strings.Builder
 		start := len(m.debugLog) - 8
 		if start < 0 {
 			start = 0
 		}
 		for _, entry := range m.debugLog[start:] {
-			b.WriteString(dimStyle.Render("  " + entry))
-			b.WriteString("\n")
+			dBuf.WriteString(dimStyle.Render("  " + entry) + "\n")
 		}
+		sections = append(sections, m.innerPanel("Debug", dBuf.String()))
 	}
 
 	// ── Error ──
 	if m.errMsg != "" {
-		b.WriteString("\n")
-		b.WriteString(errorStyle.Render(" ✗ " + m.errMsg))
+		sections = append(sections, errorStyle.Render(" ✗ "+m.errMsg))
 	}
 
 	// ── Footer ──
-	b.WriteString("\n\n")
-	b.WriteString(m.sectionDivider("ctrl+c quit  •  tab/↑↓ navigate  •  enter generate"))
-	b.WriteString("\n")
+	sections = append(sections, footerStyle.Render("ctrl+c quit  •  tab/↑↓ navigate  •  enter generate"))
 
-	// Wrap the whole output in a frame.
-	raw := b.String()
-	return m.frame(raw)
+	// Join with blank lines between sections, then wrap in outer frame.
+	inner := strings.Join(sections, "\n\n")
+	return m.frame(inner)
 }
 
-// sectionDivider returns a line that intersects the frame border, like:
-//
-//	├── Queue ──────────────────────────────────────────┤
-//
-// The label sits on the divider line itself (lazygit style).
-func (m Model) sectionDivider(label string) string {
-	width := max(m.termWidth, 40) - 2
-	prefix := "── "
-	suffix := " "
-	totalLabel := prefix + label + suffix
-	remaining := width - len(totalLabel)
-	if remaining < 2 {
-		remaining = 2
+// innerPanel wraps content in a square-cornered bordered box with a title
+// on the top border line. Content is indented by 1 inside the border.
+func (m Model) innerPanel(title, content string) string {
+	width := max(m.termWidth, 40) - 6 // outer frame (2) + inner padding (4)
+	if width < 30 {
+		width = 30
 	}
-	return "├" + dimStyle.Render(prefix) + dimStyle.Render(label) + dimStyle.Render(suffix) + dimStyle.Render(strings.Repeat("─", remaining)) + "┤"
+
+	var b strings.Builder
+
+	// Top border with title.
+	prefix := "── "
+	tail := strings.Repeat("─", max(0, width-len(prefix)-len(title)-1))
+	b.WriteString("┌")
+	b.WriteString(dimStyle.Render(prefix))
+	b.WriteString(dimStyle.Render(title))
+	b.WriteString(" ")
+	b.WriteString(dimStyle.Render(tail))
+	b.WriteString("┐")
+	b.WriteString("\n")
+
+	// Content lines with side borders.
+	for _, line := range strings.Split(strings.TrimRight(content, "\n"), "\n") {
+		plain := stripANSI(line)
+		if len(plain) > width {
+			line = truncateToWidth(line, width)
+			plain = stripANSI(line)
+		}
+		pad := width - len(plain)
+		if pad < 0 {
+			pad = 0
+		}
+		b.WriteString("│")
+		b.WriteString(line)
+		b.WriteString(strings.Repeat(" ", pad))
+		b.WriteString("│")
+		b.WriteString("\n")
+	}
+
+	// Bottom border.
+	b.WriteString("└")
+	b.WriteString(strings.Repeat("─", max(0, width)))
+	b.WriteString("┘")
+
+	return b.String()
 }
 
 // frame wraps text in a plain box-drawing-character border with rounded
@@ -1457,19 +1477,6 @@ func (m Model) frame(text string) string {
 
 	lines := strings.Split(text, "\n")
 	for _, line := range lines {
-		// Section divider lines already have ├/┤ borders — pass through as-is.
-		if strings.HasPrefix(line, "├") {
-			plain := stripANSI(line)
-			pad := width - len(plain)
-			if pad < 0 {
-				pad = 0
-			}
-			out.WriteString(line)
-			out.WriteString(strings.Repeat(" ", pad))
-			out.WriteString("\n")
-			continue
-		}
-
 		plain := stripANSI(line)
 		if len(plain) > width {
 			line = truncateToWidth(line, width)
