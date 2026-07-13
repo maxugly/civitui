@@ -10,14 +10,16 @@ are collapsed into inline status rows in the queue.
 ```
 ┌─ civitui ──────────────────────────────────────────────────────────────────────┐
 │                                                                                │
-│  Configure your generation:                                   ── Help ──       │
+│  Configure generation:                                                         │
 │                                                                                │
-│  ▶ Prompt:         [car_____________________________]   Describe the image...  │
+│  ▶ Prompt:         [car_____________________________]                          │
 │    Negative Prompt: [optional - what to avoid________]                         │
 │    Model:           [air:flux1:checkpoint:civitai...]                          │
 │    Flux Mode:       [urn:air:flux1:checkpoint:civ...]                          │
 │    Scheduler:       [EulerA_________________________]                          │
 │    ...                                                                         │
+│                                                                                │
+│  ℹ Help: Describe the image you want to generate.                              │
 │                                                                                │
 │  ── Generation Queue ───────────────────────────────────────────────────────── │
 │                                                                                │
@@ -156,8 +158,7 @@ downloads while a third prices.
 
 ### 4a. viewConfig (modified)
 
-The config form rendering is unchanged — same 21 fields, same split-pane help text,
-same presets pane, same cursor/active markers. It renders exactly as it does today.
+The config form renders as a single column without the right split-pane. The presets pane is replaced by floating popups, and the help text renders as a single thin line at the bottom of the config pane (see [specs/popup-presets.md](file:///home/m/snc/cod/civitui/specs/popup-presets.md)).
 
 ### 4b. viewQueue (new)
 

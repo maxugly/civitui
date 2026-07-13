@@ -8,6 +8,43 @@ import (
 	"github.com/m/civitui/pkg/civit"
 )
 
+// TestTextareaFocusOnTab ensures negative prompt (and prompt) actually receive
+// Focus() when tabbing — bubbles/textarea drops all keys when unfocused.
+func TestTextareaFocusOnTab(t *testing.T) {
+	m := NewModel(civit.NewClient("test"), false)
+	if !m.promptInput.Focused() {
+		t.Fatal("prompt textarea should start focused")
+	}
+	if m.negPromptInput.Focused() {
+		t.Fatal("neg prompt should start blurred")
+	}
+
+	// Tab Prompt → Negative Prompt
+	mod, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = mod.(Model)
+	if m.activeInput != fiNegativePrompt {
+		t.Fatalf("activeInput=%d, want fiNegativePrompt=%d", m.activeInput, fiNegativePrompt)
+	}
+	if !m.negPromptInput.Focused() {
+		t.Fatal("neg prompt textarea must be Focus()'d after tab (otherwise typing is dropped)")
+	}
+	if m.promptInput.Focused() {
+		t.Fatal("prompt textarea should blur when leaving the field")
+	}
+
+	// Tab back to a non-textarea field then shift-tab to neg again
+	mod, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Model
+	m = mod.(Model)
+	mod, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = mod.(Model)
+	if m.activeInput != fiNegativePrompt {
+		t.Fatalf("shift-tab back: activeInput=%d, want neg", m.activeInput)
+	}
+	if !m.negPromptInput.Focused() {
+		t.Fatal("neg prompt must refocus after shift-tab return")
+	}
+}
+
 // TestNavOrderColumnMajor ensures tab/↑↓ walk left column top→bottom, then
 // right column top→bottom (not left-to-right across each pair row).
 func TestNavOrderColumnMajor(t *testing.T) {

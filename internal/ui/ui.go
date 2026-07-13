@@ -709,15 +709,46 @@ func (m *Model) advanceFocus(dir int) {
 	}
 }
 
+// blurActiveField blurs whichever widget owns the current field
+// (textarea for prompt/negative, textinput otherwise).
+func (m *Model) blurActiveField() {
+	switch m.activeInput {
+	case fiPrompt:
+		m.promptInput.Blur()
+	case fiNegativePrompt:
+		m.negPromptInput.Blur()
+	default:
+		if m.activeInput >= 0 && m.activeInput < len(m.inputs) {
+			m.inputs[m.activeInput].Blur()
+		}
+	}
+}
+
+// focusActiveField focuses the widget for the current field.
+// Textareas must be Focus()'d or they silently drop all keystrokes.
+func (m *Model) focusActiveField() tea.Cmd {
+	switch m.activeInput {
+	case fiPrompt:
+		return m.promptInput.Focus()
+	case fiNegativePrompt:
+		return m.negPromptInput.Focus()
+	default:
+		if m.activeInput >= 0 && m.activeInput < len(m.inputs) {
+			return m.inputs[m.activeInput].Focus()
+		}
+	}
+	return nil
+}
+
 // refocusIfHidden moves focus to the next visible field in display order if
 // the current active field has become hidden (e.g. after a model change).
 func (m *Model) refocusIfHidden() {
 	if m.isFieldVisible(m.activeInput) {
 		return
 	}
-	m.inputs[m.activeInput].Blur()
+	m.blurActiveField()
 	m.advanceFocus(+1)
-	m.inputs[m.activeInput].Focus()
+	_ = m.focusActiveField()
 	m.justFocused = isReplaceOnFocus(m.activeInput)
 }
 
@@ -800,37 +831,31 @@ func newTextInput(placeholder, value string, width int) textinput.Model {
 // Numeric fields carry character-validation callbacks so letters are
 // rejected at the keystroke level.
 func NewModel(client *civit.Client, debug bool) Model {
-	// Input widths match form layout:
-	//   full-line fields: ~55 (left col minus cursor+label+gap)
-	//   paired fields: short — each half is only ~half of leftColWidth
-	//   numeric pairs: fixed small widths so columns stay even
-	textWidth := 55
-	pairTextWidth := 12 // scheduler / short preset values in a pair half
-	boolWidth := 6      // true/false
-	promptWidth := 65
+	// Input widget widths match the tight form column (no 55-char pad into empty space).
+	boolWidth := 6
 
 	inputs := make([]textinput.Model, numFormFields)
 	// Prompt and negative prompt use textarea for multi-line input.
 	// The textinput at fiPrompt/fiNegativePrompt are dummies — never rendered.
 	inputs[fiPrompt] = newTextInput("", "", 1)
 	inputs[fiNegativePrompt] = newTextInput("", "", 1)
-	inputs[fiModel] = newTextInput("air:flux1:checkpoint:civitai:618692@691639", "air:flux1:checkpoint:civitai:618692@691639", textWidth)
-	inputs[fiFluxMode] = newTextInput("Standard", "urn:air:flux1:checkpoint:civitai:618692@691639", textWidth)
-	inputs[fiSampler] = newTextInput("Euler a", "Euler a", textWidth)
-	inputs[fiScheduler] = newTextInput("EulerA", "EulerA", pairTextWidth)
-	inputs[fiAspectRatio] = newTextInput("1:1", "1:1", 8)
-	inputs[fiWidth] = newTextInput("1024", "1024", 6)
-	inputs[fiHeight] = newTextInput("1024", "1024", 6)
-	inputs[fiSteps] = newTextInput("20", "20", 6)
-	inputs[fiCFGScale] = newTextInput("7.0", "7.0", 6)
-	inputs[fiQuantity] = newTextInput("4", "4", 4)
-	inputs[fiOutputFormat] = newTextInput("jpeg", "jpeg", 8)
-	inputs[fiSeed] = newTextInput("random", "", 12)
+	inputs[fiModel] = newTextInput("air:flux1:checkpoint:civitai:618692@691639", "air:flux1:checkpoint:civitai:618692@691639", formSoloInputW)
+	inputs[fiFluxMode] = newTextInput("Standard", "urn:air:flux1:checkpoint:civitai:618692@691639", formSoloInputW)
+	inputs[fiSampler] = newTextInput("Euler a", "Euler a", formSoloInputW)
+	inputs[fiScheduler] = newTextInput("EulerA", "EulerA", formPairInputW)
+	inputs[fiAspectRatio] = newTextInput("1:1", "1:1", formPairInputW)
+	inputs[fiWidth] = newTextInput("1024", "1024", formPairInputW)
+	inputs[fiHeight] = newTextInput("1024", "1024", formPairInputW)
+	inputs[fiSteps] = newTextInput("20", "20", formPairInputW)
+	inputs[fiCFGScale] = newTextInput("7.0", "7.0", formPairInputW)
+	inputs[fiQuantity] = newTextInput("4", "4", formPairInputW)
+	inputs[fiOutputFormat] = newTextInput("jpeg", "jpeg", formSoloInputW)
+	inputs[fiSeed] = newTextInput("random", "", formPairInputW)
 	inputs[fiDraft] = newTextInput("false", "false", boolWidth)
-	inputs[fiDenoise] = newTextInput("0.4", "", 6)
-	inputs[fiClipSkip] = newTextInput("2", "2", 4)
-	inputs[fiUpscaleWidth] = newTextInput("disabled", "", 8)
-	inputs[fiUpscaleHeight] = newTextInput("disabled", "", 8)
+	inputs[fiDenoise] = newTextInput("0.4", "", formPairInputW)
+	inputs[fiClipSkip] = newTextInput("2", "2", formPairInputW)
+	inputs[fiUpscaleWidth] = newTextInput("disabled", "", formPairInputW)
+	inputs[fiUpscaleHeight] = newTextInput("disabled", "", formPairInputW)
 	inputs[fiExperimental] = newTextInput("false", "false", boolWidth)
 	inputs[fiFluxUltraRaw] = newTextInput("false", "false", boolWidth)
 
@@ -1007,6 +1032,8 @@ func NewModel(client *civit.Client, debug bool) Model {
 
 	// Multi-line text areas for prompt (5 lines) and negative prompt (3 lines).
 	// No line numbers / thick prompt gutter — those fight form column alignment.
+	// Width matches the solo input band so values line up with Model/etc.
+	promptWidth := formSoloInputW
 	pa := textarea.New()
 	pa.Placeholder = "Describe the image you want to generate..."
 	pa.ShowLineNumbers = false
@@ -1283,13 +1310,34 @@ func stripANSI(str string) string {
 //
 //	[cursor 2][label formLabelWidth][gap 1][input…]
 //
-// Paired rows split the form column into two equal cells with a 2-cell gap.
+// Paired rows use two tight cells (not half of a padded 80-col gutter).
+// Values are left-aligned after the label; the help/presets pane starts
+// immediately after the form column (no large dead zone).
 const (
 	formCursorWidth = 2
 	formLabelWidth  = 16 // fits "Negative Prompt:" / "Upscale Height:"
 	formLabelGap    = 1
 	formPairGap     = 2
+	formSoloInputW  = 48 // AIR / long preset values
+	formPairInputW  = 10 // short pair values (EulerA, 1024, 1:1, …)
+	formColGap      = 2  // gap between form column and help/presets
 )
+
+// formColumnWidth is the tight left form column: max(solo row, pair row).
+func formColumnWidth() int {
+	solo := formCursorWidth + formLabelWidth + formLabelGap + formSoloInputW
+	half := formPairHalfWidth()
+	pair := half*2 + formPairGap
+	if solo > pair {
+		return solo
+	}
+	return pair
+}
+
+// formPairHalfWidth is one cell of a paired settings row.
+func formPairHalfWidth() int {
+	return formCursorWidth + formLabelWidth + formLabelGap + formPairInputW
+}
 
 // displayWidth returns the terminal cell width of s (ANSI-aware).
 func displayWidth(s string) int {
@@ -1735,33 +1783,27 @@ func (m *Model) viewQueue(b *strings.Builder) {
 // ── View Helpers ─────────────────────────────────────────────────────────────
 
 func (m *Model) viewConfig(b *strings.Builder) {
-	// Budget form + help against the panel's inner width (no outer frame).
+	// Tight form column (content-sized) + remaining panel width for help/presets.
+	// Avoid the old panelW-36/cap-80 budget that left a huge dead gutter.
 	panelW := m.panelContentWidth()
-	// Leave room for a 2-cell gap and a usable help pane.
-	leftColWidth := panelW - 36
-	if leftColWidth < 50 {
-		leftColWidth = 50
+	leftColWidth := formColumnWidth()
+	const minHelp = 22
+	if leftColWidth+formColGap+minHelp > panelW {
+		leftColWidth = max(panelW-formColGap-minHelp, 40)
 	}
-	if leftColWidth > 80 {
-		leftColWidth = 80
-	}
-	if leftColWidth > panelW-18 {
-		leftColWidth = max(panelW-18, 40)
-	}
-
-	rightColWidth := panelW - leftColWidth - 2
-	if rightColWidth < 15 {
-		rightColWidth = 15
-	}
-	if rightColWidth > 45 {
-		rightColWidth = 45
+	rightColWidth := panelW - leftColWidth - formColGap
+	if rightColWidth < minHelp {
+		rightColWidth = minHelp
 	}
 	wrapAt := rightColWidth - 4 // indent for description lines
+	if wrapAt < 12 {
+		wrapAt = 12
+	}
 
-	// Half-width for paired settings cells (equal columns + gap).
-	pairHalf := (leftColWidth - formPairGap) / 2
-	if pairHalf < formCursorWidth+formLabelWidth+formLabelGap+6 {
-		pairHalf = formCursorWidth + formLabelWidth + formLabelGap + 6
+	// Paired cells: fixed tight half-width (not half of a padded left column).
+	pairHalf := formPairHalfWidth()
+	if pairHalf*2+formPairGap > leftColWidth {
+		pairHalf = (leftColWidth - formPairGap) / 2
 	}
 
 	// Render left-column lines in display order (not index order).
@@ -1987,14 +2029,15 @@ func (m *Model) viewConfig(b *strings.Builder) {
 			right = rightLines[row]
 		}
 
-		// Pad left column so the help/presets pane starts at a fixed column.
-		// Selected rows may already be wider (full-row highlight); leave those alone.
+		// Pad left column so help/presets start on one vertical edge (tight).
 		if displayWidth(left) < leftColWidth {
 			left = padToWidth(left, leftColWidth)
+		} else if displayWidth(left) > leftColWidth {
+			left = padToWidth(left, leftColWidth) // truncate overflow
 		}
 		b.WriteString(left)
 		if right != "" {
-			b.WriteString("  ")
+			b.WriteString(strings.Repeat(" ", formColGap))
 			b.WriteString(right)
 		}
 		b.WriteString("\n")
@@ -2151,34 +2194,34 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "tab", "down":
 		// Next visible field in visual order (matches on-screen layout).
-		m.inputs[m.activeInput].Blur()
+		m.blurActiveField()
 		m.advanceFocus(+1)
-		m.inputs[m.activeInput].Focus()
+		cmd := m.focusActiveField()
 		m.justFocused = isReplaceOnFocus(m.activeInput)
-		return m, nil
+		return m, cmd
 
 	case "shift+tab", "up":
 		// Previous visible field in visual order.
-		m.inputs[m.activeInput].Blur()
+		m.blurActiveField()
 		m.advanceFocus(-1)
-		m.inputs[m.activeInput].Focus()
+		cmd := m.focusActiveField()
 		m.justFocused = isReplaceOnFocus(m.activeInput)
-		return m, nil
+		return m, cmd
 
 	case "enter":
 		// Blur current input, validate, transition.
-		m.inputs[m.activeInput].Blur()
+		m.blurActiveField()
 
 		if m.promptInput.Value() == "" {
 			m.errMsg = "prompt is required"
-			m.inputs[m.activeInput].Focus()
-			return m, nil
+			cmd := m.focusActiveField()
+			return m, cmd
 		}
 		// Block numeric junk before it hits the wire.
 		if err := m.validateNumericFields(); err != nil {
 			m.errMsg = err.Error()
-			m.inputs[m.activeInput].Focus()
-			return m, nil
+			cmd := m.focusActiveField()
+			return m, cmd
 		}
 		m.errMsg = ""
 		job := m.createJob()
@@ -2191,11 +2234,20 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.activeInput == fiPrompt || m.activeInput == fiNegativePrompt {
 			var cmd tea.Cmd
 			if m.activeInput == fiPrompt {
-				m.promptInput, cmd = m.promptInput.Update(msg)
-			} else {
-				m.negPromptInput, cmd = m.negPromptInput.Update(msg)
+				// Ensure focused — tab only Focus()'d the dummy textinput before.
+				if !m.promptInput.Focused() {
+					cmd = m.promptInput.Focus()
+				}
+				var c tea.Cmd
+				m.promptInput, c = m.promptInput.Update(msg)
+				return m, tea.Batch(cmd, c)
 			}
-			return m, cmd
+			if !m.negPromptInput.Focused() {
+				cmd = m.negPromptInput.Focus()
+			}
+			var c tea.Cmd
+			m.negPromptInput, c = m.negPromptInput.Update(msg)
+			return m, tea.Batch(cmd, c)
 		}
 
 		// Pass keystroke to active textinput.
