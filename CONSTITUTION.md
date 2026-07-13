@@ -63,7 +63,7 @@ User (Max) triggers Architect (Bones)
     → Bones drafts plan in TODO.md / specs/
         → Implementer (Hermes) executes code changes
             → QA/Reviewer (Grok) runs tests & verifies compliance
-                → If Fail: Hermex fixes code (loop back)
+                → If Fail: Hermes fixes code (loop back)
                 → If Pass: Architect (Bones) does final checkoff
 ```
 
