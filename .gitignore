@@ -3,3 +3,6 @@
 *.jpg
 *.jpeg
 civitui
+
+# Vendored upstream API docs (not project-authored; re-fetch if needed)
+civitai-docs/

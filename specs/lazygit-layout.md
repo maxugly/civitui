@@ -362,5 +362,5 @@ The `--dump` flag and `requests.log` remain available for pre-submit inspection.
 
 - Current TUI: `internal/ui/ui.go` (1968 lines)
 - Current state machine spec: `specs/tui_state_machine.md`
-- Official API docs: `civitai-docs/orchestration/recipes/flux1.md`
+- Official API docs: https://developer.civitai.com (orchestration recipes / flux1)
 - Input masking pattern: `internal/ui/AGENTS.md`
