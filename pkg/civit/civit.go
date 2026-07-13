@@ -11,8 +11,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -137,6 +139,25 @@ type Cost struct {
 
 // ── API Methods ─────────────────────────────────────────────────────────────
 
+// requestLogger returns a log.Logger that appends to ~/.local/share/civitui/requests.log.
+// The file can be tailed from another terminal while the TUI runs — no more
+// stderr behind the bubbletea curtain.
+func requestLogger() (*log.Logger, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(home, ".local", "share", "civitui")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "requests.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
+	return log.New(f, "", log.LstdFlags), nil
+}
+
 // doJSON performs an HTTP request with JSON serialization and deserialization.
 // Retries on 5xx server errors up to maxRetries times.
 func (c *Client) doJSON(ctx context.Context, method, path string, body interface{}, params map[string]string, result interface{}) error {
@@ -157,6 +178,11 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body interface
 		data, err := json.Marshal(body)
 		if err != nil {
 			return fmt.Errorf("marshal request: %w", err)
+		}
+		// Log to file so it's inspectable from another terminal:
+		//   tail -f ~/.local/share/civitui/requests.log
+		if logger, logErr := requestLogger(); logErr == nil {
+			logger.Printf("%s %s\n  body: %s", method, url, string(data))
 		}
 		reqBody = bytes.NewReader(data)
 	}

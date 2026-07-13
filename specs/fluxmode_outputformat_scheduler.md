@@ -320,56 +320,82 @@ Already included in the slices in §1b. Placed at index 5, right after Sampler.
 
 ### 3c. Scheduler presets
 
-Five options. The API defaults to `"simple"` if an unrecognized value is sent.
+> [!WARNING]
+> **DEPRECATED PRESETS (simple, discrete, karras, exponential, ays)**:
+> The initial noise schedule presets (`simple`, `discrete`, `karras`, `exponential`, `ays`) are completely deprecated. The live CivitAI API rejects these values with:
+> `The JSON value could not be converted to Civitai.Orchestration.Grains.Jobs.Scheduler`
+> **Rationale**: The CivitAI Orchestrator API's `scheduler` parameter uses **sampler algorithm names** (e.g. `EulerA`, `DPM2`, `Heun`, etc.), rather than noise schedule names.
+
+The actual valid Scheduler values accepted by the live API (verified via integration testing) are:
+
+- `EulerA`
+- `Euler`
+- `Heun`
+- `DPM2`
+- `DPM2A`
+- `DPM2SA`
+- `DPM2M`
+- `DPMSDE`
+- `DPMFast`
+- `DPMAdaptive`
+- `LMSKarras`
+- `DPM2Karras`
+- `DPM2AKarras`
+- `DPM2SAKarras`
+- `DPM2MKarras`
+- `DPMSDEKarras`
+- `DDIM`
+- `PLMS`
+- `UniPC`
+- `LCM`
+- `DDPM`
+- `DEIS`
+- `LMS`
+
+For the TUI, we propose a structured list of recommended presets covering standard, Karras, and fast solvers:
 
 ```go
 type SchedulerPreset struct {
     Name        string
     Description string
     Scheduler   string
-    // zImageOK is true when this scheduler works with ZImage models.
-    // ZImage only supports "simple" and "discrete".
-    zImageOK bool
-    // flux2KleinOK is true when this scheduler works with Flux2Klein.
-    // Flux2Klein supports all except "ays" (crashes 100%).
-    flux2KleinOK bool
 }
 
 var schedulerPresets = []SchedulerPreset{
     {
-        Name:          "Simple",
-        Description:   "Standard uniform schedule. Works everywhere. Default.",
-        Scheduler:     "simple",
-        zImageOK:      true,
-        flux2KleinOK:  true,
+        Name:        "Euler Ancestral",
+        Description: "Euler Ancestral (EulerA). Fast, creative, standard default.",
+        Scheduler:   "EulerA",
     },
     {
-        Name:          "Discrete",
-        Description:   "Discrete timesteps. Compatible with ZImage and Flux2Klein.",
-        Scheduler:     "discrete",
-        zImageOK:      true,
-        flux2KleinOK:  true,
+        Name:        "Euler",
+        Description: "Euler. Simple, fast, and reliable.",
+        Scheduler:   "Euler",
     },
     {
-        Name:          "Karras",
-        Description:   "Karras noise schedule. Better quality at same step count. Not for ZImage.",
-        Scheduler:     "karras",
-        zImageOK:      false,
-        flux2KleinOK:  true,
+        Name:        "Heun",
+        Description: "Heun. High accuracy, double compute per step.",
+        Scheduler:   "Heun",
     },
     {
-        Name:          "Exponential",
-        Description:   "Exponential schedule. Fast convergence. Not for ZImage.",
-        Scheduler:     "exponential",
-        zImageOK:      false,
-        flux2KleinOK:  true,
+        Name:        "DPM++ 2M",
+        Description: "DPM++ 2M (DPM2M). Fast with good convergence.",
+        Scheduler:   "DPM2M",
     },
     {
-        Name:          "AYS",
-        Description:   "Align Your Steps. Best for SDXL/Flux1. Crashes Flux2Klein — hidden for that model.",
-        Scheduler:     "ays",
-        zImageOK:      false,
-        flux2KleinOK:  false,
+        Name:        "DPM++ 2M Karras",
+        Description: "DPM++ 2M Karras (DPM2MKarras). Highly recommended for SDXL.",
+        Scheduler:   "DPM2MKarras",
+    },
+    {
+        Name:        "LCM",
+        Description: "Latent Consistency Model (LCM). Fast generation with few steps.",
+        Scheduler:   "LCM",
+    },
+    {
+        Name:        "UniPC",
+        Description: "UniPC. Unified Predictor-Corrector method, fast convergence.",
+        Scheduler:   "UniPC",
     },
 }
 ```
@@ -379,36 +405,23 @@ var schedulerPresets = []SchedulerPreset{
 In `NewModel`, after `inputs[fiSampler]`:
 
 ```go
-inputs[fiScheduler] = newTextInput("simple", "simple", inputWidth)
+inputs[fiScheduler] = newTextInput("EulerA", "EulerA", inputWidth)
 ```
 
-Default is `"simple"` — universally compatible.
+Default is `"EulerA"` — the standard default scheduler when omitted.
 
 ### 3e. toRequest
 
 Already included in §1e.
 
-### 3f. Right-pane rendering — viewConfig (model-aware)
+### 3f. Right-pane rendering — viewConfig
 
-The scheduler presets are model-aware: ZImage models only support `simple` and
-`discrete`; Flux2Klein supports all except `ays`. Filter the presets list based
-on the current model value.
+The scheduler presets display the updated list in the right pane:
 
 ```go
 case fiScheduler:
     rightLines = append(rightLines, dimStyle.Render("── Scheduler ──"))
-    modelVal := m.inputs[fiModel].Value()
-    isZImage := strings.Contains(strings.ToLower(modelVal), "zimage")
-    isFlux2Klein := strings.Contains(strings.ToLower(modelVal), "flux2") ||
-        strings.Contains(strings.ToLower(modelVal), "flux-klein") ||
-        strings.Contains(strings.ToLower(modelVal), "klein")
     for _, preset := range schedulerPresets {
-        if isZImage && !preset.zImageOK {
-            continue
-        }
-        if isFlux2Klein && !preset.flux2KleinOK {
-            continue
-        }
         presetsList = append(presetsList, struct {
             Name        string
             Description string
@@ -416,67 +429,23 @@ case fiScheduler:
     }
 ```
 
-When neither ZImage nor Flux2Klein is detected, show all 5 schedulers
-(safe for SD/SDXL/Pony/Flux1 — the API falls back to `"simple"` for
-unrecognized values).
-
 ### 3g. Key handling — handleConfigKey
 
-Preset length is dynamic (model-aware filter), so compute it the same way as
-viewConfig:
+Preset length:
 
 ```go
 case fiScheduler:
-    // Count visible presets based on model.
-    modelVal := m.inputs[fiModel].Value()
-    isZImage := strings.Contains(strings.ToLower(modelVal), "zimage")
-    isFlux2Klein := strings.Contains(strings.ToLower(modelVal), "flux2") ||
-        strings.Contains(strings.ToLower(modelVal), "flux-klein") ||
-        strings.Contains(strings.ToLower(modelVal), "klein")
-    count := 0
-    for _, p := range schedulerPresets {
-        if isZImage && !p.zImageOK {
-            continue
-        }
-        if isFlux2Klein && !p.flux2KleinOK {
-            continue
-        }
-        count++
-    }
-    presetsLen = count
+    presetsLen = len(schedulerPresets)
 ```
 
-Enter handler — map activePreset to the correct scheduler value, accounting
-for the filter:
+Enter handler:
 
 ```go
 case fiScheduler:
-    // Build the visible-scheduler slice in the same order as viewConfig.
-    modelVal := m.inputs[fiModel].Value()
-    isZImage := strings.Contains(strings.ToLower(modelVal), "zimage")
-    isFlux2Klein := strings.Contains(strings.ToLower(modelVal), "flux2") ||
-        strings.Contains(strings.ToLower(modelVal), "flux-klein") ||
-        strings.Contains(strings.ToLower(modelVal), "klein")
-    visible := make([]SchedulerPreset, 0, len(schedulerPresets))
-    for _, p := range schedulerPresets {
-        if isZImage && !p.zImageOK {
-            continue
-        }
-        if isFlux2Klein && !p.flux2KleinOK {
-            continue
-        }
-        visible = append(visible, p)
-    }
-    if m.activePreset < len(visible) {
-        m.inputs[fiScheduler].SetValue(visible[m.activePreset].Scheduler)
-    }
+    m.inputs[fiScheduler].SetValue(schedulerPresets[m.activePreset].Scheduler)
 ```
 
-> **Pitfall**: If the user changes the model after selecting a scheduler that
-> isn't compatible, the field still holds the old value. The API will fall back
-> to `"simple"` for unrecognized schedulers, so this is safe. A future
-> refinement could auto-reset the scheduler when the model changes to an
-> incompatible one.
+> **Note**: Since the new valid values are independent of the model's ecosystem (unlike the deprecated noise schedules), the model-aware filtering in `handleConfigKey` and `viewConfig` can be removed or simplified. All 23 samplers are technically validated by the API, so a static preset list is clean and sufficient.
 
 ---
 

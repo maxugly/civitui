@@ -9,7 +9,7 @@ Following Grok's audit: [specs/api_parameters_audit.md](specs/api_parameters_aud
 - [x] **aspectRatio** — model-aware dropdown that auto-fills width/height. Presets per model: 1:1, 3:2, 2:3, 16:9, 9:16, 4:3, 3:4. Flux Ultra adds 21:9, 9:21.
 - [x] **fluxMode** — dropdown for Flux model variants: Draft / Standard / Krea / Pro 1.1 / Ultra. Only visible when base model is Flux1. Maps labels to AIR URNs internally.
 - [x] **outputFormat** — PNG vs JPEG toggle. Simple dropdown. Default JPEG.
-- [x] **scheduler** — dropdown: simple, discrete, karras, exponential, ays. Hide in advanced section. Model-aware: ZImage only simple/discrete, Flux2Klein all except ays.
+- [x] **scheduler** — Restore scheduler presets with correct sampler-algorithm-based values (EulerA, Euler, Heun, DPM2M, DPM2MKarras, LCM, UniPC). (Rationale: the previous presets were noise schedule names and caused API 400s; they were temporarily stripped to avoid errors. Needs restoration following corrected specs.)
 - [x] **draft** — toggle for fast preview mode. Injects draft LoRAs, drops steps to 6–8. "Speed over quality." (Spec: [specs/draft-toggle.md](specs/draft-toggle.md)) — completed in 7e93466, QA passed
 
 ## Active Tasks — Draft Toggle

@@ -36,23 +36,22 @@ Below are all 24 parameters from the `textToImageParamsSchema` Zod schema that a
 | Attribute | Value |
 |-----------|-------|
 | **Type** | `string` (enum) |
-| **Valid values** | `"simple"`, `"discrete"`, `"karras"`, `"exponential"`, `"ays"` |
-| **Default** | Falls back to `"simple"` if unrecognized |
+| **Valid values** | `"EulerA"`, `"Euler"`, `"Heun"`, `"DPM2"`, `"DPM2A"`, `"DPM2SA"`, `"DPM2M"`, `"DPMSDE"`, `"DPMFast"`, `"DPMAdaptive"`, `"LMSKarras"`, `"DPM2Karras"`, `"DPM2AKarras"`, `"DPM2SAKarras"`, `"DPM2MKarras"`, `"DPMSDEKarras"`, `"DDIM"`, `"PLMS"`, `"UniPC"`, `"LCM"`, `"DDPM"`, `"DEIS"`, `"LMS"` |
+| **Default** | Falls back to `"EulerA"` |
 | **Optional** | Yes |
-| **Zod definition** | `z.string().transform(val => ['simple','discrete','karras','exponential','ays'].includes(val) ? val : 'simple').optional()` |
+| **Zod definition** | `z.nativeEnum(Scheduler).optional()` |
 
-**What it does**: Controls the noise schedule for the diffusion sampler. Different schedulers affect convergence speed and image quality:
-- `simple` — standard uniform schedule, widely compatible
-- `discrete` — discrete timesteps
-- `karras` — Karras noise schedule, often yields better quality at same step count
-- `exponential` — exponential schedule
-- `ays` — Align Your Steps schedule (disabled for Flux2Klein — fails 100% of the time)
+> [!WARNING]
+> **DEPRECATED PRESETS (simple, discrete, karras, exponential, ays)**:
+> Historically documented values like `"simple"`, `"discrete"`, `"karras"`, `"exponential"`, and `"ays"` are completely incorrect. The live CivitAI API rejects all of them because it uses **sampler algorithm names** (PascalCase/camelCase) for the `scheduler` parameter.
+
+**What it does**: Controls the noise schedule/sampler algorithm for the diffusion process. Different schedulers affect convergence speed, rendering steps required, and final image quality.
 
 **Model-specific constraints**:
-- ZImage models: only `simple` and `discrete`
-- Flux2Klein: all except `ays` (which crashes)
+- The 23 sampler-based values are accepted by the orchestrator API.
+- Individual generation backends may fall back to default behavior if a specific model is incompatible.
 
-**UX Recommendation**: **Dropdown/preset list**. 5 fixed values. Most users never change this — hide behind an "Advanced" toggle or show only when a model that supports custom schedulers is selected. Default: `simple`.
+**UX Recommendation**: **Dropdown/preset list** of recommended values (e.g., `EulerA`, `Euler`, `Heun`, `DPM2M`, `DPM2MKarras`, `LCM`, `UniPC`). Default: `EulerA`.
 
 ---
 

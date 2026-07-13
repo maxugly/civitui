@@ -20,6 +20,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,6 +33,12 @@ import (
 )
 
 func main() {
+	// --dump: print the default request JSON and exit (no API call, no TUI).
+	if len(os.Args) > 1 && (os.Args[1] == "--dump" || os.Args[1] == "--dry-run") {
+		dumpDefaultRequest()
+		return
+	}
+
 	apiKey, err := resolveAPIKey()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -50,6 +57,39 @@ func main() {
 		fmt.Fprintf(os.Stderr, "civitui: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// dumpDefaultRequest prints the JSON that would be sent with default form values.
+// Run: civitui --dump
+func dumpDefaultRequest() {
+	req := civit.GenerationRequest{
+		Model:        "air:flux1:checkpoint:civitai:618692@691639",
+		FluxMode:     "urn:air:flux1:checkpoint:civitai:618692@691639",
+		Sampler:      "Euler a",
+		Scheduler:    "EulerA",
+		AspectRatio:  "1:1",
+		Width:        1024,
+		Height:       1024,
+		Steps:        20,
+		CFGScale:     7.0,
+		Quantity:     4,
+		OutputFormat: "jpeg",
+		Draft:        false,
+	}
+	// Wrap in the same shape the engine sends: workflowTemplate + steps.
+	type step struct {
+		Type  string                 `json:"$type"`
+		Input civit.GenerationRequest `json:"input"`
+	}
+	payload := struct {
+		WorkflowTemplate string `json:"workflowTemplate"`
+		Steps            []step `json:"steps"`
+	}{
+		WorkflowTemplate: "txt2img",
+		Steps:            []step{{Type: "textToImage", Input: req}},
+	}
+	data, _ := json.MarshalIndent(payload, "", "  ")
+	fmt.Println(string(data))
 }
 
 // resolveAPIKey loads the API key from the environment variable,

@@ -381,52 +381,57 @@ var fluxModePresets = []FluxModePreset{
 }
 
 // ── Scheduler Presets ────────────────────────────────────────────────────────
+//
+// The CivitAI API's Scheduler enum uses sampler algorithm names (EulerA, DPM2, etc.),
+// not noise schedule names (simple, karras, etc.). All 23 sampler-based values
+// are valid; we expose a recommended subset of 7. Verified against live API
+// via integration tests (2026-07-13, bones).
+//
+// DEPRECATED (noise schedule names that cause API 400s):
+//   simple, discrete, karras, exponential, ays
 
-// SchedulerPreset selects a noise schedule. Model-aware: ZImage only
-// supports simple+discrete; Flux2Klein supports all except ays.
+// SchedulerPreset selects a scheduler algorithm for the generation.
 type SchedulerPreset struct {
-	Name         string
-	Description  string
-	Scheduler    string
-	zImageOK     bool
-	flux2KleinOK bool
+	Name        string
+	Description string
+	Scheduler   string
 }
 
 var schedulerPresets = []SchedulerPreset{
 	{
-		Name:         "Simple",
-		Description:  "Standard uniform schedule. Works everywhere. Default.",
-		Scheduler:    "simple",
-		zImageOK:     true,
-		flux2KleinOK: true,
+		Name:        "Euler Ancestral",
+		Description: "Euler Ancestral (EulerA). Fast, creative, standard default.",
+		Scheduler:   "EulerA",
 	},
 	{
-		Name:         "Discrete",
-		Description:  "Discrete timesteps. Compatible with ZImage and Flux2Klein.",
-		Scheduler:    "discrete",
-		zImageOK:     true,
-		flux2KleinOK: true,
+		Name:        "Euler",
+		Description: "Euler. Simple, fast, and reliable.",
+		Scheduler:   "Euler",
 	},
 	{
-		Name:         "Karras",
-		Description:  "Karras noise schedule. Better quality at same step count. Not for ZImage.",
-		Scheduler:    "karras",
-		zImageOK:     false,
-		flux2KleinOK: true,
+		Name:        "Heun",
+		Description: "Heun. High accuracy, double compute per step.",
+		Scheduler:   "Heun",
 	},
 	{
-		Name:         "Exponential",
-		Description:  "Exponential schedule. Fast convergence. Not for ZImage.",
-		Scheduler:    "exponential",
-		zImageOK:     false,
-		flux2KleinOK: true,
+		Name:        "DPM++ 2M",
+		Description: "DPM++ 2M (DPM2M). Fast with good convergence.",
+		Scheduler:   "DPM2M",
 	},
 	{
-		Name:         "AYS",
-		Description:  "Align Your Steps. Best for SDXL/Flux1. Crashes Flux2Klein — hidden for that model.",
-		Scheduler:    "ays",
-		zImageOK:     false,
-		flux2KleinOK: false,
+		Name:        "DPM++ 2M Karras",
+		Description: "DPM++ 2M Karras (DPM2MKarras). Highly recommended for SDXL.",
+		Scheduler:   "DPM2MKarras",
+	},
+	{
+		Name:        "LCM",
+		Description: "Latent Consistency Model (LCM). Fast generation with few steps.",
+		Scheduler:   "LCM",
+	},
+	{
+		Name:        "UniPC",
+		Description: "UniPC. Unified Predictor-Corrector method, fast convergence.",
+		Scheduler:   "UniPC",
 	},
 }
 
@@ -571,18 +576,17 @@ func (m *Model) adjustFieldsForEcosystem() {
 		m.inputs[fiSampler].SetValue("")
 	}
 
-	// Reset scheduler if stale
-	if len(m.filteredSchedulerPresets()) > 0 {
-		cur := m.inputs[fiScheduler].Value()
+	// Reset scheduler to EulerA if the current value isn't a known preset.
+	if cur := m.inputs[fiScheduler].Value(); cur != "" {
 		valid := false
-		for _, s := range m.filteredSchedulerPresets() {
+		for _, s := range schedulerPresets {
 			if s.Scheduler == cur {
 				valid = true
 				break
 			}
 		}
 		if !valid {
-			m.inputs[fiScheduler].SetValue(m.filteredSchedulerPresets()[0].Scheduler)
+			m.inputs[fiScheduler].SetValue(schedulerPresets[0].Scheduler)
 		}
 	}
 
@@ -656,7 +660,7 @@ var fieldHelpText = []string{
 	/* fiModel */ "Civitai Model AIR. Represents the base generator model. Use Right Arrow key to select from popular presets.",
 	/* fiFluxMode */ "Flux model variant. Only applies when using a Flux1 model. Use Right Arrow to select from presets.",
 	/* fiSampler */ "Diffusion sampler algorithm. Controls noise schedule and convergence. Use Right Arrow key to select from presets.",
-	/* fiScheduler */ "Noise schedule for the sampler. 'simple' works everywhere. Advanced: discrete, karras, exponential, ays. Use Right Arrow to select.",
+	/* fiScheduler */ "Scheduler algorithm. Uses sampler names (EulerA, DPM2, LCM, etc.). Default: EulerA. Use Right Arrow to select from presets.",
 	/* fiAspectRatio */ "Image aspect ratio. Use Right Arrow key to select from presets — auto-fills Width and Height.",
 	/* fiWidth */ "Width of the generated image in pixels. Range: 64–4096. Standard resolutions: 1024, 2048. Only digits allowed.",
 	/* fiHeight */ "Height of the generated image in pixels. Range: 64–4096. Standard resolutions: 1024, 2048. Only digits allowed.",
@@ -701,7 +705,7 @@ func NewModel(client *civit.Client) Model {
 	inputs[fiModel] = newTextInput("air:flux1:checkpoint:civitai:618692@691639", "air:flux1:checkpoint:civitai:618692@691639", inputWidth)
 	inputs[fiFluxMode] = newTextInput("Standard", "urn:air:flux1:checkpoint:civitai:618692@691639", inputWidth)
 	inputs[fiSampler] = newTextInput("Euler a", "Euler a", inputWidth)
-	inputs[fiScheduler] = newTextInput("simple", "simple", inputWidth)
+	inputs[fiScheduler] = newTextInput("EulerA", "EulerA", inputWidth)
 	inputs[fiAspectRatio] = newTextInput("1:1", "1:1", 14)
 	inputs[fiWidth] = newTextInput("1024", "1024", 10)
 	inputs[fiHeight] = newTextInput("1024", "1024", 10)
@@ -1806,26 +1810,12 @@ func (m *Model) syncAspectRatio() {
 	}
 }
 
-// filteredSchedulerPresets returns the scheduler presets that are valid
-// for the currently selected model. ZImage only supports simple+discrete;
-// Flux2Klein supports all except ays.
+// filteredSchedulerPresets returns all scheduler presets. The new sampler-based
+// values are ecosystem-independent — all 23 valid schedulers work across all models.
+// The model-aware filtering (zImageOK, flux2KleinOK) was for the deprecated noise
+// schedule names and has been removed.
 func (m *Model) filteredSchedulerPresets() []SchedulerPreset {
-	modelVal := strings.ToLower(m.inputs[fiModel].Value())
-	isZImage := strings.Contains(modelVal, "zimage")
-	isFlux2Klein := strings.Contains(modelVal, "flux2") ||
-		strings.Contains(modelVal, "flux-klein") ||
-		strings.Contains(modelVal, "klein")
-	var visible []SchedulerPreset
-	for _, p := range schedulerPresets {
-		if isZImage && !p.zImageOK {
-			continue
-		}
-		if isFlux2Klein && !p.flux2KleinOK {
-			continue
-		}
-		visible = append(visible, p)
-	}
-	return visible
+	return schedulerPresets
 }
 
 func (m Model) handleConfirmKey(key string) (tea.Model, tea.Cmd) {
