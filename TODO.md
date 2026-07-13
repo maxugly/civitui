@@ -11,6 +11,13 @@
 - [ ] **img2img Source Image Interface** — Implement user interface elements (e.g., text input field for local file path or URL) to support source image selection. When an image is loaded/linked, automatically set `sourceImage` on the model to enable the `denoise` parameter input field.
 - [ ] **Migrate Engine to `imageGen` URN Orchestration** — Transition `pkg/civit` client workflow payload creation to target the newly-supported `imageGen` orchestration workflow API (featuring `engine`, `ecosystem`, and `operation` parameters) instead of legacy `textToImage` steps.
 - [ ] **Stale Job Queue Auto-Cleanup** — Add periodic background cleanup (or a manual clear shortcut) for completed or failed jobs in the TUI queue older than 5 minutes to prevent memory accumulation.
+- [ ] **Multi-Panel Dashboard Skeleton Layout** (per [specs/dashboard-skeleton.md](file:///home/m/snc/cod/civitui/specs/dashboard-skeleton.md))
+  - [ ] **Define State & Focus Enums**: Introduce `FocusPanel` enum (`FocusSidebar`, `FocusContent`, `FocusRight`) and tab index constants in [internal/ui/ui.go](file:///home/m/snc/cod/civitui/internal/ui/ui.go).
+  - [ ] **Build Left Sidebar**: Render 9 tabs vertically inside an 18-char sidebar pane with active tab highlighting.
+  - [ ] **Orchestrate Horizontal Layout**: Use `lipgloss.JoinHorizontal` to align Left Sidebar, Center Content, and Right Panel.
+  - [ ] **Implement Keyboard Tab-Switching**: Wire number keys `1`–`9` and `tab`/`shift+tab` tab navigation inside the update loop. Add `esc`/`left` key routing to return focus to the sidebar.
+  - [ ] **Add Center Tab Swapping & Right Panel stub**: Swap content based on active tab index (Input = form + queue + debug, others = placeholder). Render 'Images Library' stub pane.
+  - [ ] **Update Footer Status Line**: Render context-sensitive shortcuts on the footer line.
 
 ---
 
