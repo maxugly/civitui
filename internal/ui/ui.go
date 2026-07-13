@@ -1363,57 +1363,59 @@ func fileDebugLogPath() string {
 	return filepath.Join(dir, "debug.log")
 }
 
-// View renders the config form at the top and the job queue below.
-// The config form is always visible and editable. Jobs stack in the
-// queue with live status updates.
+// View renders the config form at the top and the job queue below,
+// wrapped in lazygit-style bordered panels.
 func (m Model) View() string {
-	var b strings.Builder
+	var sections []string
 
-	// Header bar.
-	b.WriteString(headerStyle.Render(" civitui "))
-	b.WriteString("  ")
-	b.WriteString(phaseStyle.Render(" [CONFIG] "))
-	b.WriteString("\n\n")
+	// ── Header ──
+	header := headerStyle.Render(" civitui ") + "  " + phaseStyle.Render(" [CONFIG] ")
+	title := sectionStyle.Copy().BorderTop(false).BorderBottom(false).Render(header)
+	sections = append(sections, title)
 
-	// Config form — always visible.
-	m.viewConfig(&b)
+	// ── Config form ──
+	var cfgBuf strings.Builder
+	m.viewConfig(&cfgBuf)
+	sections = append(sections, sectionStyle.Render(cfgBuf.String()))
 
-	// Job queue.
+	// ── Queue ──
 	if len(m.jobs) > 0 {
-		b.WriteString("\n")
-		b.WriteString(dimStyle.Render("── Generation Queue "))
-		b.WriteString(dimStyle.Render(strings.Repeat("─", max(0, m.termWidth-23))))
-		b.WriteString("\n")
-		m.viewQueue(&b)
+		var qBuf strings.Builder
+		m.viewQueue(&qBuf)
+		queueTitle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11")).Render(" Queue ")
+		queueContent := qBuf.String()
+		// Remove trailing newline for cleaner borders
+		queueContent = strings.TrimRight(queueContent, "\n")
+		sections = append(sections, sectionStyle.Render(queueTitle+"\n"+queueContent))
 	}
 
-	// Debug log — raw terminal output, only in --debug mode.
+	// ── Debug ──
 	if m.debug && len(m.debugLog) > 0 {
-		b.WriteString("\n")
-		b.WriteString(dimStyle.Render("── Debug Log ──"))
-		b.WriteString(dimStyle.Render(strings.Repeat("─", max(0, m.termWidth-16))))
-		b.WriteString("\n")
-		// Show last N entries that fit in remaining height.
+		var dBuf strings.Builder
 		start := len(m.debugLog) - 8
 		if start < 0 {
 			start = 0
 		}
 		for _, entry := range m.debugLog[start:] {
-			b.WriteString(dimStyle.Render("  " + entry))
-			b.WriteString("\n")
+			dBuf.WriteString("  " + entry + "\n")
 		}
+		dbgTitle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("8")).Render(" Debug ")
+		dbgContent := strings.TrimRight(dBuf.String(), "\n")
+		sections = append(sections, sectionStyle.Render(dbgTitle+"\n"+dbgContent))
 	}
 
-	// Error bar.
+	// ── Error ──
 	if m.errMsg != "" {
-		b.WriteString("\n")
-		b.WriteString(errorStyle.Render(" ✗ " + m.errMsg))
+		sections = append(sections, errorStyle.Render(" ✗ "+m.errMsg))
 	}
 
-	// Footer.
-	b.WriteString(fmt.Sprintf("\n\n%s", footerStyle.Render("ctrl+c quit  •  tab/↑↓ navigate  •  enter generate")))
+	// ── Footer ──
+	footer := footerStyle.Render("ctrl+c quit  •  tab/↑↓ navigate  •  enter generate")
+	sections = append(sections, footer)
 
-	return b.String()
+	// Join all sections vertically and wrap in the outer frame.
+	inner := lipgloss.JoinVertical(lipgloss.Left, sections...)
+	return sectionStyle.Copy().Padding(0, 1).Width(m.termWidth - 4).Render(inner)
 }
 
 // viewQueue renders each job in the queue as a single status line.
@@ -2053,4 +2055,8 @@ var (
 	// textInputStyle wraps the textinput's built-in rendering so it
 	// inherits our terminal color scheme.
 	textInputStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+
+	// LazyGit-style bordered panels.
+	frameStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("24")).Padding(0, 1)
+	sectionStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("24")).Padding(0, 1)
 )
