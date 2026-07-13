@@ -84,13 +84,19 @@ not tolerated — if a test is broken, fix it.
 ```
 civitui/
 ├── main.go                 # entry point — API key resolution, bubble tea init
-├── pkg/civit/              # CORE ENGINE — no UI imports allowed
+├── pkg/civit/              # CORE ENGINE — Tom's territory (see pkg/civit/AGENTS.md)
+│   ├── AGENTS.md           #   rules for the engine layer
 │   ├── civit.go            #   Client, CalculatePrice, SubmitJob, PollJobStatus, DownloadImage
 │   └── civit_test.go       #   16 httptest-native unit tests
-├── internal/ui/            # UI LAYER — no HTTP/JSON allowed
+├── internal/ui/            # UI LAYER — Tom's territory (see internal/ui/AGENTS.md)
+│   ├── AGENTS.md           #   rules for the TUI layer
 │   └── ui.go               #   Bubble Tea TUI, 7-phase state machine, 14 fields
-├── specs/                  # architectural specs (Bones writes these)
+├── specs/                  # Bones' territory (see specs/AGENTS.md)
+│   └── AGENTS.md           #   rules for architectural specs
+├── qa/                     # Grit's territory (see qa/AGENTS.md)
+│   └── AGENTS.md           #   rules for QA reviews + template
 ├── CONSTITUTION.md         # immutable engineering laws
+├── AGENTS.md               # ← you are here — master crew plan
 ├── TODO.md                 # task tracker (Bones writes, Tom marks done)
 └── go.mod / go.sum
 ```
