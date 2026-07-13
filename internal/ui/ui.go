@@ -716,11 +716,11 @@ func newTextInput(placeholder, value string, width int) textinput.Model {
 // Numeric fields carry character-validation callbacks so letters are
 // rejected at the keystroke level.
 func NewModel(client *civit.Client, debug bool) Model {
-	inputWidth := 60
+	inputWidth := 80
 
 	inputs := make([]textinput.Model, numFormFields)
-	inputs[fiPrompt] = newTextInput("a majestic cat wearing a top hat", "", inputWidth)
-	inputs[fiNegativePrompt] = newTextInput("optional — what to avoid", "", inputWidth)
+	inputs[fiPrompt] = newTextInput("a majestic cat wearing a top hat", "", 100)
+	inputs[fiNegativePrompt] = newTextInput("optional — what to avoid", "", 100)
 	inputs[fiModel] = newTextInput("air:flux1:checkpoint:civitai:618692@691639", "air:flux1:checkpoint:civitai:618692@691639", inputWidth)
 	inputs[fiFluxMode] = newTextInput("Standard", "urn:air:flux1:checkpoint:civitai:618692@691639", inputWidth)
 	inputs[fiSampler] = newTextInput("Euler a", "Euler a", inputWidth)
@@ -1364,58 +1364,91 @@ func fileDebugLogPath() string {
 }
 
 // View renders the config form at the top and the job queue below,
-// wrapped in lazygit-style bordered panels.
+// wrapped in a clean frame — like lazygit. Content is rendered raw,
+// then the outer border and section dividers are applied.
 func (m Model) View() string {
-	var sections []string
+	var b strings.Builder
 
-	// ── Header ──
-	header := headerStyle.Render(" civitui ") + "  " + phaseStyle.Render(" [CONFIG] ")
-	title := sectionStyle.Copy().BorderTop(false).BorderBottom(false).Render(header)
-	sections = append(sections, title)
+	// ── Header bar ──
+	b.WriteString(headerStyle.Render(" civitui "))
+	b.WriteString("  ")
+	b.WriteString(phaseStyle.Render(" [CONFIG] "))
+	b.WriteString("\n\n")
 
 	// ── Config form ──
-	var cfgBuf strings.Builder
-	m.viewConfig(&cfgBuf)
-	sections = append(sections, sectionStyle.Render(cfgBuf.String()))
+	m.viewConfig(&b)
 
 	// ── Queue ──
 	if len(m.jobs) > 0 {
-		var qBuf strings.Builder
-		m.viewQueue(&qBuf)
-		queueTitle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11")).Render(" Queue ")
-		queueContent := qBuf.String()
-		// Remove trailing newline for cleaner borders
-		queueContent = strings.TrimRight(queueContent, "\n")
-		sections = append(sections, sectionStyle.Render(queueTitle+"\n"+queueContent))
+		b.WriteString("\n")
+		b.WriteString(dimStyle.Render("── Queue "))
+		b.WriteString(dimStyle.Render(strings.Repeat("─", max(0, m.termWidth-11))))
+		b.WriteString("\n")
+		m.viewQueue(&b)
 	}
 
 	// ── Debug ──
 	if m.debug && len(m.debugLog) > 0 {
-		var dBuf strings.Builder
+		b.WriteString("\n")
+		b.WriteString(dimStyle.Render("── Debug "))
+		b.WriteString(dimStyle.Render(strings.Repeat("─", max(0, m.termWidth-11))))
+		b.WriteString("\n")
 		start := len(m.debugLog) - 8
 		if start < 0 {
 			start = 0
 		}
 		for _, entry := range m.debugLog[start:] {
-			dBuf.WriteString("  " + entry + "\n")
+			b.WriteString(dimStyle.Render("  " + entry))
+			b.WriteString("\n")
 		}
-		dbgTitle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("8")).Render(" Debug ")
-		dbgContent := strings.TrimRight(dBuf.String(), "\n")
-		sections = append(sections, sectionStyle.Render(dbgTitle+"\n"+dbgContent))
 	}
 
 	// ── Error ──
 	if m.errMsg != "" {
-		sections = append(sections, errorStyle.Render(" ✗ "+m.errMsg))
+		b.WriteString("\n")
+		b.WriteString(errorStyle.Render(" ✗ " + m.errMsg))
 	}
 
 	// ── Footer ──
-	footer := footerStyle.Render("ctrl+c quit  •  tab/↑↓ navigate  •  enter generate")
-	sections = append(sections, footer)
+	b.WriteString(fmt.Sprintf("\n\n%s", footerStyle.Render("ctrl+c quit  •  tab/↑↓ navigate  •  enter generate")))
 
-	// Join all sections vertically and wrap in the outer frame.
-	inner := lipgloss.JoinVertical(lipgloss.Left, sections...)
-	return sectionStyle.Copy().Padding(0, 1).Width(m.termWidth - 4).Render(inner)
+	// Wrap the whole output in a frame.
+	raw := b.String()
+	return m.frame(raw)
+}
+
+// frame wraps text in a bordered box that spans the full terminal width.
+// Each line gets │ ... │ on the sides, with a top ┌──┐ and bottom └──┘.
+func (m Model) frame(text string) string {
+	width := max(m.termWidth, 40) - 2 // account for side borders
+	var out strings.Builder
+
+	// Top border.
+	out.WriteString(dimStyle.Render("┌"))
+	out.WriteString(dimStyle.Render(strings.Repeat("─", max(0, width))))
+	out.WriteString(dimStyle.Render("┐"))
+	out.WriteString("\n")
+
+	lines := strings.Split(text, "\n")
+	for _, line := range lines {
+		plain := stripANSI(line)
+		pad := width - len(plain)
+		if pad < 0 {
+			pad = 0
+		}
+		out.WriteString(dimStyle.Render("│"))
+		out.WriteString(line)
+		out.WriteString(strings.Repeat(" ", pad))
+		out.WriteString(dimStyle.Render("│"))
+		out.WriteString("\n")
+	}
+
+	// Bottom border.
+	out.WriteString(dimStyle.Render("└"))
+	out.WriteString(dimStyle.Render(strings.Repeat("─", max(0, width))))
+	out.WriteString(dimStyle.Render("┘"))
+
+	return out.String()
 }
 
 // viewQueue renders each job in the queue as a single status line.
