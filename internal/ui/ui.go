@@ -1657,17 +1657,29 @@ func (m *Model) viewConfig(b *strings.Builder) {
 				ta = m.negPromptInput
 			}
 			taLines := strings.Split(ta.View(), "\n")
+			isActive := i == m.activeInput && !m.inPresetsPane
 			for li, tline := range taLines {
+				var l string
 				if li == 0 {
 					lbl := fieldLabelStyle.Render(fmt.Sprintf("  %-16s", fieldLabels[i]+":"))
-					if i == m.activeInput && !m.inPresetsPane {
-						leftLines = append(leftLines, cursorStyle.Render("▶ ")+lbl+textInputStyle.Render(tline))
+					if isActive {
+						l = cursorStyle.Render("▶ ") + lbl + textInputStyle.Render(tline)
 					} else {
-						leftLines = append(leftLines, "  "+lbl+textInputStyle.Render(tline))
+						l = "  " + lbl + textInputStyle.Render(tline)
 					}
 				} else {
-					leftLines = append(leftLines, "                    "+textInputStyle.Render(tline))
+					l = "                    " + textInputStyle.Render(tline)
 				}
+				if isActive {
+					// Pad to full width for full-line highlight.
+					plain := stripANSI(l)
+					pad := leftColWidth - len(plain) + rightColWidth + 2
+					if pad > 0 {
+						l += strings.Repeat(" ", pad)
+					}
+					l = selectedStyle.Render(l)
+				}
+				leftLines = append(leftLines, l)
 			}
 			continue
 		}
@@ -1675,7 +1687,8 @@ func (m *Model) viewConfig(b *strings.Builder) {
 		// Label.
 		label := fieldLabelStyle.Render(fmt.Sprintf("  %-16s", fieldLabels[i]+":"))
 		line := label
-		if i == m.activeInput && !m.inPresetsPane {
+		isActive := i == m.activeInput && !m.inPresetsPane
+		if isActive {
 			line = cursorStyle.Render("▶ ") + label
 		} else {
 			line = "  " + label
@@ -1686,6 +1699,15 @@ func (m *Model) viewConfig(b *strings.Builder) {
 		// from the selected preset's dimensions.
 		if i == fiAspectRatio && !m.aspectRatioMatches() {
 			line = dimStyle.Render(stripANSI(line))
+		}
+
+		if isActive {
+			plain := stripANSI(line)
+			pad := leftColWidth - len(plain) + rightColWidth + 2
+			if pad > 0 {
+				line += strings.Repeat(" ", pad)
+			}
+			line = selectedStyle.Render(line)
 		}
 
 		leftLines = append(leftLines, line)
@@ -2258,4 +2280,7 @@ var (
 	// LazyGit-style bordered panels.
 	frameStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("24")).Padding(0, 1)
 	sectionStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("24")).Padding(0, 1)
+
+	// Selected row highlight — lazygit sky-blue background.
+	selectedStyle = lipgloss.NewStyle().Background(lipgloss.Color("25")).Foreground(lipgloss.Color("15"))
 )
