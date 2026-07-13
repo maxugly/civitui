@@ -1554,6 +1554,17 @@ func (m *Model) viewConfig(b *strings.Builder) {
 		leftColWidth = 80
 	}
 
+	// Right-column width: what's left after the left column and the gap.
+	// Dynamically calculated so content fits inside the frame.
+	rightColWidth := m.termWidth - 2 - leftColWidth - 2
+	if rightColWidth < 15 {
+		rightColWidth = 15
+	}
+	if rightColWidth > 45 {
+		rightColWidth = 45
+	}
+	wrapAt := rightColWidth - 4 // indent for description lines
+
 	// Render left-column lines into a slice.
 	var leftLines []string
 
@@ -1672,7 +1683,7 @@ func (m *Model) viewConfig(b *strings.Builder) {
 			}
 			rightLines = append(rightLines, fmt.Sprintf("%s%s", marker, presetStyle.Render(preset.Name)))
 			// Wrap description under the name.
-			for _, descLine := range wrapText(preset.Description, 38) {
+			for _, descLine := range wrapText(preset.Description, wrapAt) {
 				rightLines = append(rightLines, dimStyle.Render("    "+descLine))
 			}
 		}
@@ -1687,7 +1698,7 @@ func (m *Model) viewConfig(b *strings.Builder) {
 		// Context-sensitive help for the active field.
 		rightLines = append(rightLines, dimStyle.Render("── Help ──"))
 		if m.activeInput < len(fieldHelpText) {
-			for _, helpLine := range wrapText(fieldHelpText[m.activeInput], 40) {
+			for _, helpLine := range wrapText(fieldHelpText[m.activeInput], rightColWidth) {
 				rightLines = append(rightLines, helpStyle.Render(helpLine))
 			}
 		}
