@@ -1607,6 +1607,7 @@ func fileDebugLogPath() string {
 
 // View renders the config form at the top and the job queue below,
 // each in its own bordered panel (lazygit-style — no outer mega-frame).
+// When inPresetsPane, a centered floating popup is overlaid on top.
 func (m Model) View() string {
 	var sections []string
 
@@ -1646,7 +1647,43 @@ func (m Model) View() string {
 	// ── Footer ── plain status line under the panels (not a window border).
 	sections = append(sections, dimStyle.Render("ctrl+c quit  •  tab/↑↓ navigate  •  enter generate"))
 
-	return strings.Join(sections, "\n\n")
+	base := strings.Join(sections, "\n\n")
+
+	// ── Popup overlay ──
+	if m.inPresetsPane {
+		popup := m.viewPresetsPopup()
+		if popup != "" {
+			baseLines := strings.Split(base, "\n")
+			popupLines := strings.Split(popup, "\n")
+
+			termW := max(m.termWidth, 40)
+			termH := max(m.termHeight, 10)
+
+			popupW := 48
+			popupH := len(popupLines)
+
+			xStart := (termW - popupW) / 2
+			yStart := (termH - popupH) / 2
+			if xStart < 0 {
+				xStart = 0
+			}
+			if yStart < 0 {
+				yStart = 0
+			}
+
+			for i, pl := range popupLines {
+				targetY := yStart + i
+				if targetY >= len(baseLines) {
+					break
+				}
+				baseLines[targetY] = overlayLine(baseLines[targetY], pl, xStart)
+			}
+
+			base = strings.Join(baseLines, "\n")
+		}
+	}
+
+	return base
 }
 
 // panelContentWidth is the inner width of a full-width lazygit panel.
@@ -1783,22 +1820,7 @@ func (m *Model) viewQueue(b *strings.Builder) {
 // ── View Helpers ─────────────────────────────────────────────────────────────
 
 func (m *Model) viewConfig(b *strings.Builder) {
-	// Tight form column (content-sized) + remaining panel width for help/presets.
-	// Avoid the old panelW-36/cap-80 budget that left a huge dead gutter.
-	panelW := m.panelContentWidth()
 	leftColWidth := formColumnWidth()
-	const minHelp = 22
-	if leftColWidth+formColGap+minHelp > panelW {
-		leftColWidth = max(panelW-formColGap-minHelp, 40)
-	}
-	rightColWidth := panelW - leftColWidth - formColGap
-	if rightColWidth < minHelp {
-		rightColWidth = minHelp
-	}
-	wrapAt := rightColWidth - 4 // indent for description lines
-	if wrapAt < 12 {
-		wrapAt = 12
-	}
 
 	// Paired cells: fixed tight half-width (not half of a padded left column).
 	pairHalf := formPairHalfWidth()
@@ -1901,145 +1923,25 @@ func (m *Model) viewConfig(b *strings.Builder) {
 		leftLines = append(leftLines, line)
 	}
 
-	// Right-column content: either model presets or context help.
-	var rightLines []string
+	// Thin contextual help line at the bottom of the config pane.
+	leftLines = append(leftLines, "")
 
+	helpText := ""
+	if m.activeInput < len(fieldHelpText) {
+		helpText = fieldHelpText[m.activeInput]
+	}
 	if isPresetsField(m.activeInput) {
-		// Model, sampler, or aspect ratio presets pane.
-		var presetsList []struct {
-			Name        string
-			Description string
-		}
-
-		switch m.activeInput {
-		case fiModel:
-			rightLines = append(rightLines, dimStyle.Render("── Model Presets ──"))
-			for _, preset := range modelPresets {
-				presetsList = append(presetsList, struct {
-					Name        string
-					Description string
-				}{preset.Name, preset.Description})
-			}
-		case fiFluxMode:
-			rightLines = append(rightLines, dimStyle.Render("── Flux Mode ──"))
-			for _, preset := range fluxModePresets {
-				presetsList = append(presetsList, struct {
-					Name        string
-					Description string
-				}{preset.Name, preset.Description})
-			}
-		case fiSampler:
-			rightLines = append(rightLines, dimStyle.Render("── Sampler Presets ──"))
-			for _, preset := range m.filteredSamplerPresets() {
-				presetsList = append(presetsList, struct {
-					Name        string
-					Description string
-				}{preset.Name, preset.Description})
-			}
-		case fiScheduler:
-			rightLines = append(rightLines, dimStyle.Render("── Scheduler ──"))
-			for _, preset := range m.filteredSchedulerPresets() {
-				presetsList = append(presetsList, struct {
-					Name        string
-					Description string
-				}{preset.Name, preset.Description})
-			}
-		case fiAspectRatio:
-			rightLines = append(rightLines, dimStyle.Render("── Aspect Ratio ──"))
-			for _, preset := range aspectRatioPresets {
-				presetsList = append(presetsList, struct {
-					Name        string
-					Description string
-				}{preset.Label, ""})
-			}
-		case fiOutputFormat:
-			rightLines = append(rightLines, dimStyle.Render("── Output Format ──"))
-			for _, preset := range outputFormatPresets {
-				presetsList = append(presetsList, struct {
-					Name        string
-					Description string
-				}{preset.Name, preset.Description})
-			}
-		case fiDraft:
-			rightLines = append(rightLines, dimStyle.Render("── Draft Mode ──"))
-			for _, preset := range draftPresets {
-				presetsList = append(presetsList, struct {
-					Name        string
-					Description string
-				}{preset.Name, preset.Description})
-			}
-		case fiExperimental:
-			rightLines = append(rightLines, dimStyle.Render("── Experimental Mode ──"))
-			for _, preset := range experimentalPresets {
-				presetsList = append(presetsList, struct {
-					Name        string
-					Description string
-				}{preset.Name, preset.Description})
-			}
-		case fiFluxUltraRaw:
-			rightLines = append(rightLines, dimStyle.Render("── Flux Ultra Raw ──"))
-			for _, preset := range fluxUltraRawPresets {
-				presetsList = append(presetsList, struct {
-					Name        string
-					Description string
-				}{preset.Name, preset.Description})
-			}
-		}
-		for j, preset := range presetsList {
-			marker := "  "
-			if m.inPresetsPane && j == m.activePreset {
-				marker = cursorStyle.Render("▶ ")
-			}
-			rightLines = append(rightLines, fmt.Sprintf("%s%s", marker, presetStyle.Render(preset.Name)))
-			// Wrap description under the name.
-			for _, descLine := range wrapText(preset.Description, wrapAt) {
-				rightLines = append(rightLines, dimStyle.Render("    "+descLine))
-			}
-		}
-		if m.inPresetsPane {
-			rightLines = append(rightLines, "")
-			rightLines = append(rightLines, dimStyle.Render("↑↓ select  enter apply  ← esc back"))
-		} else {
-			rightLines = append(rightLines, "")
-			rightLines = append(rightLines, dimStyle.Render("Press → to browse presets"))
-		}
-	} else {
-		// Context-sensitive help for the active field.
-		rightLines = append(rightLines, dimStyle.Render("── Help ──"))
-		if m.activeInput < len(fieldHelpText) {
-			for _, helpLine := range wrapText(fieldHelpText[m.activeInput], rightColWidth) {
-				rightLines = append(rightLines, helpStyle.Render(helpLine))
-			}
-		}
+		helpText += " Press → to browse presets."
+	}
+	helpLine := "  ℹ Help: " + helpText
+	panelW := m.panelContentWidth()
+	for _, hl := range wrapText(helpLine, panelW-4) {
+		leftLines = append(leftLines, dimStyle.Render(hl))
 	}
 
-	// Render side-by-side.
-	maxRows := len(leftLines)
-	if len(rightLines) > maxRows {
-		maxRows = len(rightLines)
-	}
-
-	for row := 0; row < maxRows; row++ {
-		left := ""
-		if row < len(leftLines) {
-			left = leftLines[row]
-		}
-		right := ""
-		if row < len(rightLines) {
-			right = rightLines[row]
-		}
-
-		// Pad left column so help/presets start on one vertical edge (tight).
-		if displayWidth(left) < leftColWidth {
-			left = padToWidth(left, leftColWidth)
-		} else if displayWidth(left) > leftColWidth {
-			left = padToWidth(left, leftColWidth) // truncate overflow
-		}
-		b.WriteString(left)
-		if right != "" {
-			b.WriteString(strings.Repeat(" ", formColGap))
-			b.WriteString(right)
-		}
+	// Write lines to the buffer.
+	for _, line := range leftLines {
+		b.WriteString(line)
 		b.WriteString("\n")
 	}
 }
@@ -2052,6 +1954,217 @@ func (m *Model) viewSubmitting(b *strings.Builder)  {}
 func (m *Model) viewPolling(b *strings.Builder)     {}
 func (m *Model) viewDownloading(b *strings.Builder) {}
 func (m *Model) viewDone(b *strings.Builder)        {}
+
+// ── Floating Preset Popup ─────────────────────────────────────────────────────
+
+// viewPresetsPopup builds a bordered popup panel containing the active
+// field's presets, with the item at activePreset highlighted. The popup
+// is exactly 48 cells wide (including borders) and height-capped at 15.
+func (m *Model) viewPresetsPopup() string {
+	const popupWidth = 48
+	innerW := popupWidth - 2
+
+	// Gather presets for the active field.
+	type presetItem struct {
+		Name        string
+		Description string
+	}
+	var items []presetItem
+	var title string
+
+	switch m.activeInput {
+	case fiModel:
+		title = "Model Presets"
+		for _, p := range modelPresets {
+			items = append(items, presetItem{p.Name, p.Description})
+		}
+	case fiFluxMode:
+		title = "Flux Mode"
+		for _, p := range fluxModePresets {
+			items = append(items, presetItem{p.Name, p.Description})
+		}
+	case fiSampler:
+		title = "Sampler Presets"
+		for _, p := range m.filteredSamplerPresets() {
+			items = append(items, presetItem{p.Name, p.Description})
+		}
+	case fiScheduler:
+		title = "Scheduler"
+		for _, p := range m.filteredSchedulerPresets() {
+			items = append(items, presetItem{p.Name, p.Description})
+		}
+	case fiAspectRatio:
+		title = "Aspect Ratio"
+		for _, p := range aspectRatioPresets {
+			items = append(items, presetItem{p.Label, ""})
+		}
+	case fiOutputFormat:
+		title = "Output Format"
+		for _, p := range outputFormatPresets {
+			items = append(items, presetItem{p.Name, p.Description})
+		}
+	case fiDraft:
+		title = "Draft Mode"
+		for _, p := range draftPresets {
+			items = append(items, presetItem{p.Name, p.Description})
+		}
+	case fiExperimental:
+		title = "Experimental Mode"
+		for _, p := range experimentalPresets {
+			items = append(items, presetItem{p.Name, p.Description})
+		}
+	case fiFluxUltraRaw:
+		title = "Flux Ultra Raw"
+		for _, p := range fluxUltraRawPresets {
+			items = append(items, presetItem{p.Name, p.Description})
+		}
+	default:
+		return ""
+	}
+
+	// Height: items × 2 lines + 4 (top border, bottom border, title, footer).
+	height := len(items)*2 + 4
+	if height > 15 {
+		height = 15
+	}
+	if m.termHeight > 0 && height > m.termHeight-6 {
+		height = m.termHeight - 6
+	}
+
+	var b strings.Builder
+
+	// Top border with title.
+	titleText := "── " + title + " "
+	tail := strings.Repeat("─", max(0, innerW-displayWidth(titleText)))
+	b.WriteString("┌")
+	b.WriteString(titleText)
+	b.WriteString(tail)
+	b.WriteString("┐\n")
+
+	// Item rows.
+	available := (height - 4) / 2
+	if available < 0 {
+		available = 0
+	}
+	for i, item := range items {
+		if i >= available {
+			break
+		}
+		// Name line: highlighted if this is the active preset.
+		if i == m.activePreset {
+			nameLine := "▶ " + item.Name
+			// Full-row highlight with sky-blue background.
+			nameLine = selectedStyle.Render(padToWidth(nameLine, innerW))
+			b.WriteString("│")
+			b.WriteString(nameLine)
+			b.WriteString("│\n")
+		} else {
+			nameLine := "  " + presetStyle.Render(item.Name)
+			nameLine = padToWidth(nameLine, innerW)
+			b.WriteString("│")
+			b.WriteString(nameLine)
+			b.WriteString("│\n")
+		}
+		// Description line (dimmed, below the name).
+		if item.Description != "" {
+			descLine := "    " + item.Description
+			descLine = truncateToWidth(descLine, innerW)
+			b.WriteString("│")
+			b.WriteString(dimStyle.Render(padToWidth(descLine, innerW)))
+			b.WriteString("│\n")
+		} else {
+			b.WriteString("│")
+			b.WriteString(strings.Repeat(" ", innerW))
+			b.WriteString("│\n")
+		}
+	}
+
+	// Pad any remaining lines within the item area.
+	itemLineCount := len(items) * 2
+	if itemLineCount > available*2 {
+		itemLineCount = available * 2
+	}
+	for i := itemLineCount; i < height-4; i++ {
+		b.WriteString("│")
+		b.WriteString(strings.Repeat(" ", innerW))
+		b.WriteString("│\n")
+	}
+
+	// Footer instruction line.
+	footer := "↑↓ select  •  enter apply  •  ←/esc back"
+	b.WriteString("│")
+	b.WriteString(dimStyle.Render(padToWidth(footer, innerW)))
+	b.WriteString("│\n")
+
+	// Bottom border.
+	b.WriteString("└")
+	b.WriteString(strings.Repeat("─", innerW))
+	b.WriteString("┘")
+
+	return b.String()
+}
+
+// overlayLine replaces a portion of the base line with the overlay line,
+// starting at visual character index startX, preserving ANSI escape codes.
+func overlayLine(base, overlay string, startX int) string {
+	baseRunes := []rune(base)
+	overlayWidth := displayWidth(overlay)
+
+	var result strings.Builder
+	inEscape := false
+	visualCol := 0
+
+	for i := 0; i < len(baseRunes); i++ {
+		r := baseRunes[i]
+		if inEscape {
+			result.WriteRune(r)
+			if r == 'm' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				inEscape = false
+			}
+			continue
+		}
+		if r == '\x1b' {
+			inEscape = true
+			result.WriteRune(r)
+			continue
+		}
+
+		// If we've reached the overlay start position, inject the overlay
+		// and skip the corresponding visual columns of the base string.
+		if visualCol == startX {
+			result.WriteString(overlay)
+			visualCol += overlayWidth
+			// Skip base characters that were overwritten, preserving
+			// any ANSI codes we encounter during the skip.
+			skipEnd := startX + overlayWidth
+			for visualCol < skipEnd && i < len(baseRunes) {
+				i++
+				if i >= len(baseRunes) {
+					break
+				}
+				r2 := baseRunes[i]
+				if r2 == '\x1b' {
+					result.WriteRune(r2)
+					for i+1 < len(baseRunes) {
+						i++
+						r3 := baseRunes[i]
+						result.WriteRune(r3)
+						if r3 == 'm' || (r3 >= 'A' && r3 <= 'Z') || (r3 >= 'a' && r3 <= 'z') {
+							break
+						}
+					}
+				}
+				// visual character consumed by overlay
+			}
+			i-- // adjust for loop increment
+			continue
+		}
+
+		result.WriteRune(r)
+		visualCol++
+	}
+	return result.String()
+}
 
 // ── Key Handling ─────────────────────────────────────────────────────────────
 
@@ -2181,11 +2294,15 @@ func (m Model) handleConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Presets fields are select-only — block free-form typing.
 	// Only navigation keys (tab/up/down/enter) pass through; typing
-	// is eaten. Use right arrow to browse and apply presets.
+	// is eaten. Enter opens the presets popup; right arrow does too.
 	if isPresetsField(m.activeInput) && !m.inPresetsPane {
 		switch key {
-		case "tab", "down", "shift+tab", "up", "enter":
-			// navigation and form submit pass through
+		case "tab", "down", "shift+tab", "up":
+			// navigation passes through
+		case "enter":
+			m.inPresetsPane = true
+			m.activePreset = 0
+			return m, nil
 		default:
 			return m, nil // eat the keystroke
 		}

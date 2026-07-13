@@ -2,12 +2,12 @@
 
 ## Active Tasks — Feature Expansion & API Integration
 
-- [ ] **Floating Preset Popups and Thin Help Line** (per [specs/popup-presets.md](file:///home/m/snc/cod/civitui/specs/popup-presets.md))
-  - [ ] **Remove Old Split-Pane Layout**: Delete the right-pane presets and help column rendering from `viewConfig` in [internal/ui/ui.go](file:///home/m/snc/cod/civitui/internal/ui/ui.go), simplifying the config pane to a single-column layout.
-  - [ ] **Implement Contextual Help Line**: Render the active input's help text as a single thin status line (`ℹ Help: <text> [Press → to browse presets]`) at the bottom of the config pane.
-  - [ ] **Build Bordered Preset Popup Panel**: Write `viewPresetsPopup() string` to compile a bordered panel containing the active input's presets, highlighting the item at `activePreset`.
-  - [ ] **Write ANSI-Safe Overlay Logic**: Implement the `overlayLine` helper to safely slice and write the popup box on top of the base view without breaking ANSI/color escape codes.
-  - [ ] **Wire Popup Event Loop & Key Block**: Update key routing in `handleConfigKey` and `Update` so that all keystrokes except global quit are routed to the active popup and blocked from underlying inputs when `inPresetsPane` is true.
+- [x] **Floating Preset Popups and Thin Help Line** (per [specs/popup-presets.md](file:///home/m/snc/cod/civitui/specs/popup-presets.md))
+  - [x] **Remove Old Split-Pane Layout**: Delete the right-pane presets and help column rendering from `viewConfig` in [internal/ui/ui.go](file:///home/m/snc/cod/civitui/internal/ui/ui.go), simplifying the config pane to a single-column layout.
+  - [x] **Implement Contextual Help Line**: Render the active input's help text as a single thin status line (`ℹ Help: <text> [Press → to browse presets]`) at the bottom of the config pane.
+  - [x] **Build Bordered Preset Popup Panel**: Write `viewPresetsPopup() string` to compile a bordered panel containing the active input's presets, highlighting the item at `activePreset`.
+  - [x] **Write ANSI-Safe Overlay Logic**: Implement the `overlayLine` helper to safely slice and write the popup box on top of the base view without breaking ANSI/color escape codes.
+  - [x] **Wire Popup Event Loop & Key Block**: Update key routing in `handleConfigKey` and `Update` so that all keystrokes except global quit are routed to the active popup and blocked from underlying inputs when `inPresetsPane` is true.
 - [ ] **img2img Source Image Interface** — Implement user interface elements (e.g., text input field for local file path or URL) to support source image selection. When an image is loaded/linked, automatically set `sourceImage` on the model to enable the `denoise` parameter input field.
 - [ ] **Migrate Engine to `imageGen` URN Orchestration** — Transition `pkg/civit` client workflow payload creation to target the newly-supported `imageGen` orchestration workflow API (featuring `engine`, `ecosystem`, and `operation` parameters) instead of legacy `textToImage` steps.
 - [ ] **Stale Job Queue Auto-Cleanup** — Add periodic background cleanup (or a manual clear shortcut) for completed or failed jobs in the TUI queue older than 5 minutes to prevent memory accumulation.
