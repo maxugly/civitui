@@ -24,11 +24,26 @@
 
 1. Read the spec in `../specs/` AND `pkg/civit/` docs BEFORE touching this file.
 2. All API calls go through `pkg/civit.Client`. Never bypass it.
-3. New form fields: add `fi*` constant, increment `numFormFields`, add input + validate + label + help.
-4. Input masking: validate at keystroke level, flash `errMsg` on rejection (invisible masking is broken).
-5. Presets-only fields: block free-form typing, right arrow to browse, enter to apply.
-6. After changes: `go build ./...` must pass.
-7. Mark tasks complete in `../TODO.md`.
+3. **EVERY numeric field MUST have keystroke-level input masking.** This is non-negotiable.
+4. New form fields: add `fi*` constant, increment `numFormFields`, add input + validate + label + help.
+5. Input masking: validate at keystroke level, flash `errMsg` on rejection (invisible masking is broken).
+6. Presets-only fields: block free-form typing, right arrow to browse, enter to apply.
+7. After changes: `go build ./...` must pass.
+8. Mark tasks complete in `../TODO.md`.
+
+### Input masking checklist (every numeric field)
+
+When adding a new numeric field, ALL of these must be done:
+
+- [ ] `inputs[fiXxx].Validate` — regex gate + range check
+- [ ] `handleConfigKey` rollback block — capture oldValue/oldPos, restore on Err
+- [ ] `m.errMsg = input.Err.Error()` — USER MUST SEE why their keystroke was rejected
+- [ ] `justFocused` gate — first keystroke clears old value for numeric fields
+- [ ] `isReplaceOnFocus` returns true for this index (if numeric)
+
+If any of these are missing, the field accepts junk silently. The user will
+notice and you will look incompetent. This happened before. Don't let it
+happen again.
 
 ## UI architecture (don't break this)
 

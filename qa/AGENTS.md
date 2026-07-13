@@ -64,6 +64,7 @@ code for constitution compliance, approves or rejects.
 - [ ] Code block rule (single command, no comments/prompts)
 - [ ] No skipped or broken tests
 - [ ] JSON tags match schema
+- [ ] **All numeric fields have keystroke-level input masking** (Validate callback + rollback + errMsg flash + justFocused + isReplaceOnFocus)
 
 ## Findings
 

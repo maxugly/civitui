@@ -79,6 +79,15 @@ go test ./... -count=1
 All three must pass. Zero errors. Warnings count as errors. Skipped tests are
 not tolerated — if a test is broken, fix it.
 
+### Input masking rule (non-negotiable)
+
+Every numeric form field MUST have keystroke-level input masking. The user
+must never be able to type an invalid character into a numeric field — it
+should be silently blocked OR rejected with a visible error flash. The
+checklist (see `internal/ui/AGENTS.md`) is: Validate callback, rollback on
+Err, errMsg flash, justFocused gate, isReplaceOnFocus. If any of these are
+missing, the field is broken. This happened before. Do not repeat it.
+
 ## Project structure
 
 ```
