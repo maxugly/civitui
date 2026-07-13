@@ -39,6 +39,10 @@ func main() {
 		return
 	}
 
+	// --debug: enable verbose logging — raw request/response bodies shown
+	// in a terminal pane below the job queue + written to ~/.local/share/civitui/debug.log.
+	debug := len(os.Args) > 1 && os.Args[1] == "--debug"
+
 	apiKey, err := resolveAPIKey()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -50,7 +54,7 @@ func main() {
 	client := civit.NewClient(apiKey)
 
 	// Create the UI model and start the Bubble Tea runtime.
-	model := ui.NewModel(client)
+	model := ui.NewModel(client, debug)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := program.Run(); err != nil {

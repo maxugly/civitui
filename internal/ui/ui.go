@@ -12,6 +12,8 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -169,6 +171,12 @@ type Model struct {
 	// different stages simultaneously.
 	jobs      []*Job
 	nextJobID int // auto-incrementing counter
+
+	// ── Debug ──
+
+	debug     bool     // verbose logging enabled (--debug flag)
+	debugLog  []string // ring buffer of recent log entries
+	debugFile string   // path to debug.log file
 
 	// ── Terminal geometry ──
 
@@ -707,7 +715,7 @@ func newTextInput(placeholder, value string, width int) textinput.Model {
 // The config form starts with 11 textinput fields, with Prompt focused.
 // Numeric fields carry character-validation callbacks so letters are
 // rejected at the keystroke level.
-func NewModel(client *civit.Client) Model {
+func NewModel(client *civit.Client, debug bool) Model {
 	inputWidth := 60
 
 	inputs := make([]textinput.Model, numFormFields)
@@ -904,11 +912,17 @@ func NewModel(client *civit.Client) Model {
 	// Focus the first field.
 	inputs[fiPrompt].Focus()
 
-	return Model{
+	m := Model{
 		client:      client,
 		inputs:      inputs,
 		activeInput: 0,
+		debug:       debug,
 	}
+	if debug {
+		m.debugFile = fileDebugLogPath()
+		m.logDebug("debug mode enabled — raw request/response bodies below")
+	}
+	return m
 }
 
 // toRequest builds a GenerationRequest from the current form state.
@@ -1207,9 +1221,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			job.Status = JobFailed
 			job.ErrMsg = msg.err.Error()
+			m.logDebug("job %s pricing FAILED: %s", msg.jobID, msg.err)
 		} else {
 			job.Cost = msg.cost
 			job.Status = JobConfirming
+			m.logDebug("job %s priced: %d buzz, awaiting confirmation", msg.jobID, msg.cost)
 		}
 
 	case submitResultMsg:
@@ -1220,12 +1236,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			job.Status = JobFailed
 			job.ErrMsg = msg.err.Error()
+			m.logDebug("job %s submit FAILED: %s", msg.jobID, msg.err)
 		} else {
 			job.apiJobID = msg.apiJobID
 			job.pollTick = 0
 			job.dlPaths = nil
 			job.dlErrors = nil
 			job.Status = JobPolling
+			m.logDebug("job %s submitted, API job: %s, polling...", msg.jobID, msg.apiJobID)
 			return m, pollCmd(m.client, msg.jobID, msg.apiJobID)
 		}
 
@@ -1304,12 +1322,45 @@ func (m *Model) createJob() *Job {
 	if len(prompt) > 40 {
 		prompt = prompt[:37] + "..."
 	}
-	return &Job{
+	j := &Job{
 		ID:     id,
 		Prompt: prompt,
 		Status: JobPricing,
 		req:    m.toRequest(),
 	}
+	m.logDebug("job %s created: %q", id, prompt)
+	return j
+}
+
+// ── Debug Logging ─────────────────────────────────────────────────────────────
+
+// logDebug appends a formatted message to the debug ring buffer and writes it
+// to the debug log file. No-op when debug mode is off.
+func (m *Model) logDebug(format string, args ...interface{}) {
+	if !m.debug {
+		return
+	}
+	msg := fmt.Sprintf(format, args...)
+	m.debugLog = append(m.debugLog, msg)
+	// Keep last 200 entries.
+	if len(m.debugLog) > 200 {
+		m.debugLog = m.debugLog[len(m.debugLog)-200:]
+	}
+	if m.debugFile != "" {
+		f, err := os.OpenFile(m.debugFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err == nil {
+			fmt.Fprintf(f, "%s %s\n", time.Now().Format("15:04:05"), msg)
+			f.Close()
+		}
+	}
+}
+
+// fileDebugLogPath returns the path to the debug log file.
+func fileDebugLogPath() string {
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, ".local", "share", "civitui")
+	os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, "debug.log")
 }
 
 // View renders the config form at the top and the job queue below.
@@ -1334,6 +1385,23 @@ func (m Model) View() string {
 		b.WriteString(dimStyle.Render(strings.Repeat("─", max(0, m.termWidth-23))))
 		b.WriteString("\n")
 		m.viewQueue(&b)
+	}
+
+	// Debug log — raw terminal output, only in --debug mode.
+	if m.debug && len(m.debugLog) > 0 {
+		b.WriteString("\n")
+		b.WriteString(dimStyle.Render("── Debug Log ──"))
+		b.WriteString(dimStyle.Render(strings.Repeat("─", max(0, m.termWidth-16))))
+		b.WriteString("\n")
+		// Show last N entries that fit in remaining height.
+		start := len(m.debugLog) - 8
+		if start < 0 {
+			start = 0
+		}
+		for _, entry := range m.debugLog[start:] {
+			b.WriteString(dimStyle.Render("  " + entry))
+			b.WriteString("\n")
+		}
 	}
 
 	// Error bar.
